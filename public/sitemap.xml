@@ -25,6 +25,12 @@
     <priority>0.7</priority>
   </url>
   <url>
+    <loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/contractors</loc>
+    <lastmod>2026-08-03</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
     <loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/service-area/fredericksburg</loc>
     <lastmod>2026-08-03</lastmod>
     <changefreq>monthly</changefreq>

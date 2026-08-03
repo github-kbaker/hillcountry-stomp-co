@@ -267,6 +267,15 @@ function WhoWeHelp() {
             </div>
           ))}
         </div>
+        <p className="mt-8 text-sm text-limestone-300">
+          Are you a tree company, landscaper, builder, or property manager?{" "}
+          <Link
+            to="/contractors"
+            className="font-semibold text-limestone-100 underline underline-offset-4 hover:text-white"
+          >
+            See how contractor partnerships work →
+          </Link>
+        </p>
       </div>
     </section>
   );

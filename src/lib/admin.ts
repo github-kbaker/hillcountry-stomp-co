@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 import { sql } from "~/db";
 import { DEFAULT_LEAD_STATUS, LEAD_STATUSES } from "./admin-meta";
@@ -222,6 +222,26 @@ function toLeadRow(payload: Record<string, unknown>): LeadRow {
  * Read every lead — Postgres when DATABASE_URL is set, the data/leads/*.json
  * files otherwise. Same preference order as submitLead in lead.ts.
  */
+async function readLeadPayload(id: string): Promise<Record<string, unknown> | null> {
+  if (process.env.DATABASE_URL) {
+    try {
+      const rows = await sql()`select id, payload from leads where id = ${id} limit 1`;
+      if (rows[0]) return { ...(rows[0].payload as Record<string, unknown>), id };
+    } catch (err) { console.error("[admin] DATABASE detail failed:", err); }
+  }
+  try { return JSON.parse(await readFile(join(LEADS_DIR, `${id}.json`), "utf8")); }
+  catch { return null; }
+}
+
+async function writeLeadPayload(id: string, payload: Record<string, unknown>): Promise<void> {
+  if (process.env.DATABASE_URL) {
+    try { await sql()`update leads set payload = ${JSON.stringify(payload)} where id = ${id}`; return; }
+    catch (err) { console.error("[admin] DATABASE update failed, trying file:", err); }
+  }
+  await mkdir(LEADS_DIR, { recursive: true });
+  await writeFile(join(LEADS_DIR, `${id}.json`), JSON.stringify(payload, null, 2));
+}
+
 async function readAllLeads(): Promise<LeadRow[]> {
   if (process.env.DATABASE_URL) {
     try {
@@ -354,6 +374,47 @@ export const listLeads = createServerFn({ method: "POST" }).handler(
  * Delete a lead (used for lifecycle testing and housekeeping). REQUIRES a
  * valid session; returns 401 when unauthenticated.
  */
+export const getLead = createServerFn({ method: "POST" }).handler(
+  async ({ data }: { data: { id: string } }) => {
+    if (!(await isAuthenticated())) return unauthorizedResponse();
+    const payload = await readLeadPayload(String(data.id ?? ""));
+    return payload ? { ...(payload as object), id: String(data.id) } : jsonResponse({ error: "not_found" }, 404);
+  },
+);
+
+export const updateLead = createServerFn({ method: "POST" }).handler(
+  async ({ data }: { data: { id: string; patch: Record<string, unknown> } }) => {
+    if (!(await isAuthenticated())) return unauthorizedResponse();
+    const id = String(data.id ?? "");
+    const existing = await readLeadPayload(id);
+    if (!existing) return jsonResponse({ error: "not_found" }, 404);
+    const patch = data.patch ?? {};
+    if (patch.status && !(LEAD_STATUSES as readonly string[]).includes(String(patch.status))) return jsonResponse({ error: "invalid_status" }, 400);
+    const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status"];
+    const next = { ...existing };
+    for (const key of allowed) if (key in patch) next[key] = patch[key];
+    await writeLeadPayload(id, next);
+    return { ok: true, lead: next };
+  },
+);
+
+export const getLeadPhoto = createServerFn({ method: "POST" }).handler(
+  async ({ data }: { data: { leadId: string; filename: string } }): Promise<Response> => {
+    if (!(await isAuthenticated())) return unauthorizedResponse();
+    const leadId = String(data.leadId ?? "");
+    const filename = basename(String(data.filename ?? ""));
+    const payload = await readLeadPayload(leadId);
+    const photos = Array.isArray(payload?.photos) ? payload.photos.map(String) : [];
+    const match = photos.find((p) => basename(p) === filename);
+    if (!match) return jsonResponse({ error: "not_found" }, 404);
+    try {
+      const bytes = await readFile(join(process.cwd(), "data", "uploads", leadId, filename));
+      const type = filename.endsWith(".png") ? "image/png" : filename.endsWith(".webp") ? "image/webp" : "image/jpeg";
+      return new Response(bytes, { headers: { "content-type": type, "cache-control": "private, no-store" } });
+    } catch { return jsonResponse({ error: "not_found" }, 404); }
+  },
+);
+
 export const deleteLead = createServerFn({ method: "POST" }).handler(
   async ({ data }: { data: { id: string } }): Promise<{ ok: boolean } | Response> => {
     if (!(await isAuthenticated())) return unauthorizedResponse();
@@ -371,6 +432,7 @@ export const deleteLead = createServerFn({ method: "POST" }).handler(
     }
     try {
       await rm(join(LEADS_DIR, `${id}.json`), { force: true });
+      await rm(join(process.cwd(), "data", "uploads", id), { recursive: true, force: true });
       return { ok: true };
     } catch (err) {
       console.error(`[admin] failed to delete lead ${id}:`, err);

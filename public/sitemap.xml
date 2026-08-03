@@ -54,4 +54,17 @@
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services</loc><changefreq>monthly</changefreq><priority>0.9</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/residential-stump-grinding</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/commercial-stump-grinding</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/tree-stump-removal</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/surface-root-grinding</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/fence-line-clearing</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/ranch-cleanup</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/builder-site-preparation</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/tree-company-overflow</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/contractor-subcontract-services</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/brush-removal</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/wood-chip-removal</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
+  <url><loc>https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/services/backfill-services</loc><changefreq>monthly</changefreq><priority>0.8</priority></url>
 </urlset>

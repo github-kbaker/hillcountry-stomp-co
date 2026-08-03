@@ -231,7 +231,7 @@ function Services() {
                 {s.desc}
               </p>
               <Link
-                to="/estimate"
+                to={`/services/${s.title.toLowerCase() === "residential" ? "residential-stump-grinding" : s.title.toLowerCase() === "commercial" ? "commercial-stump-grinding" : "ranch-cleanup"}`}
                 className="mt-4 inline-block font-semibold text-forest-700 underline-offset-4 hover:underline"
               >
                 Get a free estimate →

@@ -31,6 +31,15 @@ export type ServiceAreaContent = {
   faqs: { q: string; a: string }[];
 };
 
+function serviceLink(title: string) {
+  const t = title.toLowerCase();
+  if (t.includes("commercial")) return "/services/commercial-stump-grinding" as const;
+  if (t.includes("ranch")) return "/services/ranch-cleanup" as const;
+  if (t.includes("root")) return "/services/surface-root-grinding" as const;
+  if (t.includes("fence")) return "/services/fence-line-clearing" as const;
+  return "/services/residential-stump-grinding" as const;
+}
+
 export function ServiceAreaPage(c: ServiceAreaContent) {
   const cityPath = `/service-area/${c.slug}`;
   const crumbs = [
@@ -127,10 +136,10 @@ export function ServiceAreaPage(c: ServiceAreaContent) {
                   {s.desc}
                 </p>
                 <Link
-                  to="/estimate"
+                  to={serviceLink(s.title)}
                   className="mt-auto pt-4 font-semibold text-forest-700 underline-offset-4 hover:underline"
                 >
-                  Get a free estimate →
+                  Learn about this service →
                 </Link>
               </article>
             ))}

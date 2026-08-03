@@ -65,6 +65,7 @@ export const SERVICE_AREA_PAGES: Record<string, string> = {
 export const NAV_LINKS = [
   { href: "/", label: "Home" },
   { href: "/estimate", label: "Free Estimate" },
+  { href: "/services", label: "Services" },
   { href: "/contact", label: "Contact" },
   { href: "/about", label: "About" },
 ] as const;

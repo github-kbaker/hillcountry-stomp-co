@@ -129,6 +129,14 @@ function Footer() {
                 </Link>
               </li>
             ))}
+            <li>
+              <Link
+                to="/contractors"
+                className="text-limestone-200 hover:text-white"
+              >
+                Contractor Partnerships
+              </Link>
+            </li>
           </ul>
         </div>
         <div>

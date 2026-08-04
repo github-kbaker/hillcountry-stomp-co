@@ -1,7 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { PhoneCta } from "~/components/PhoneCta";
 import { pageHead } from "~/lib/seo";
-import { PHONE_DISPLAY, PHONE_TEL, SITE_NAME, CITY_HUB } from "~/lib/site";
+import { SITE_NAME, CITY_HUB } from "~/lib/site";
 
 export const Route = createFileRoute("/about")({
   head: () =>
@@ -64,7 +65,8 @@ function About() {
         </h2>
         <p className="mt-2 text-charcoal-700">
           We don't have a decades-long story to tell you — we have a way of
-          working we're proud of. Here's what you can count on when you call:
+          working we're proud of. Here's what you can count on when you reach
+          out:
         </p>
       </div>
 
@@ -104,9 +106,7 @@ function About() {
           <Link to="/estimate" className="btn-primary">
             Get Free Estimate
           </Link>
-          <a href={`tel:${PHONE_TEL}`} className="btn-charcoal">
-            Call {PHONE_DISPLAY}
-          </a>
+          <PhoneCta className="btn-charcoal" />
         </div>
       </div>
     </div>

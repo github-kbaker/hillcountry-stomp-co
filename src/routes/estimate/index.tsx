@@ -4,7 +4,13 @@ import type { ChangeEvent, FormEvent } from "react";
 
 import { submitLead } from "~/lib/lead";
 import { pageHead } from "~/lib/seo";
-import { PHONE_DISPLAY, PHONE_TEL, SITE_NAME } from "~/lib/site";
+import {
+  BUSINESS_PHONE,
+  EMAIL,
+  HAS_PHONE,
+  PHONE_TEL,
+  SITE_NAME,
+} from "~/lib/site";
 
 export const Route = createFileRoute("/estimate/")({
   head: () =>
@@ -167,11 +173,11 @@ function Estimate() {
         return;
       }
       setFormError(
-        "Something went wrong saving your request. Please try again or call us.",
+        `Something went wrong saving your request. Please try again or email us at ${EMAIL}.`,
       );
     } catch {
       setFormError(
-        "Network error — please try again, or call us directly and we'll take your info over the phone.",
+        `Network error — please try again, or email us at ${EMAIL} and we'll take your details from there.`,
       );
     } finally {
       setSubmitting(false);
@@ -635,12 +641,30 @@ function Estimate() {
 
         <div className="rounded-xl border border-forest-700/20 bg-forest-50 p-5 text-sm text-charcoal-700">
           <p>
-            <strong className="text-forest-900">Prefer to talk it through?</strong>{" "}
-            Call us at{" "}
-            <a href={`tel:${PHONE_TEL}`} className="font-semibold text-forest-700 underline underline-offset-2">
-              {PHONE_DISPLAY}
-            </a>
-            . We only use your information to prepare your estimate — no spam.
+            {HAS_PHONE ? (
+              <>
+                <strong className="text-forest-900">Prefer to talk it through?</strong>{" "}
+                Call us at{" "}
+                <a
+                  href={`tel:${PHONE_TEL}`}
+                  className="font-semibold text-forest-700 underline underline-offset-2"
+                >
+                  {BUSINESS_PHONE}
+                </a>
+                . We only use your information to prepare your estimate — no spam.
+              </>
+            ) : (
+              <>
+                Have questions? Email us at{" "}
+                <a
+                  href={`mailto:${EMAIL}`}
+                  className="font-semibold text-forest-700 underline underline-offset-2"
+                >
+                  {EMAIL}
+                </a>
+                . We only use your information to prepare your estimate — no spam.
+              </>
+            )}
           </p>
         </div>
 

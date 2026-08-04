@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { PhoneCta } from "~/components/PhoneCta";
 import { pageHead } from "~/lib/seo";
-import { PHONE_DISPLAY, PHONE_TEL, SITE_NAME } from "~/lib/site";
+import { SITE_NAME } from "~/lib/site";
 
 export const Route = createFileRoute("/estimate/thank-you")({
   head: () =>
@@ -46,16 +47,14 @@ function ThankYou() {
         </p>
       )}
       <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-        <a href={`tel:${PHONE_TEL}`} className="btn-primary">
-          Call {PHONE_DISPLAY}
-        </a>
+        <PhoneCta className="btn-primary" />
         <Link to="/" className="btn-charcoal">
           Back to Home
         </Link>
       </div>
       <p className="mt-8 text-sm text-charcoal-500">
-        Need to add more photos or change a detail? Just reply to our call or
-        email — we're happy to update your request.
+        Need to add more photos or change a detail? Just reply to our email —
+        we're happy to update your request.
       </p>
     </div>
   );

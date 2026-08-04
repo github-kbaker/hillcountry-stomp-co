@@ -3,10 +3,11 @@ import type { ReactNode } from "react";
 
 import appCss from "~/styles/app.css?url";
 import {
+  BUSINESS_PHONE,
   EMAIL,
+  HAS_PHONE,
   HOURS_LABEL,
   NAV_LINKS,
-  PHONE_DISPLAY,
   PHONE_TEL,
   SITE_NAME,
   SITE_TAGLINE,
@@ -78,12 +79,14 @@ function Header() {
               </span>
             </span>
           </Link>
-          <a
-            href={`tel:${PHONE_TEL}`}
-            className="btn-primary ml-auto px-3.5 py-2 text-sm lg:hidden"
-          >
-            Call Now
-          </a>
+          {HAS_PHONE && (
+            <a
+              href={`tel:${PHONE_TEL}`}
+              className="btn-primary ml-auto px-3.5 py-2 text-sm lg:hidden"
+            >
+              Call Now
+            </a>
+          )}
         </div>
         <nav aria-label="Main" className="flex items-center gap-1 pb-3 text-sm lg:pb-0">
           {NAV_LINKS.map((l) => (
@@ -155,11 +158,13 @@ function Footer() {
             Contact
           </h2>
           <ul className="mt-3 space-y-2 text-sm">
-            <li>
-              <a href={`tel:${PHONE_TEL}`} className="font-semibold text-limestone-50 hover:text-white">
-                {PHONE_DISPLAY}
-              </a>
-            </li>
+            {HAS_PHONE && (
+              <li>
+                <a href={`tel:${PHONE_TEL}`} className="font-semibold text-limestone-50 hover:text-white">
+                  {BUSINESS_PHONE}
+                </a>
+              </li>
+            )}
             <li>
               <a href={`mailto:${EMAIL}`} className="text-limestone-200 hover:text-white">
                 {EMAIL}
@@ -186,14 +191,16 @@ function Footer() {
 function MobileCtaBar() {
   return (
     <div className="fixed inset-x-0 bottom-0 z-50 border-t border-forest-800 bg-forest-900 md:hidden">
-      <div className="grid grid-cols-2">
-        <a
-          href={`tel:${PHONE_TEL}`}
-          className="flex items-center justify-center gap-2 py-3.5 text-sm font-bold text-limestone-50 transition-colors active:bg-forest-800"
-        >
-          <PhoneIcon className="h-4 w-4" aria-hidden="true" />
-          Call Now
-        </a>
+      <div className={HAS_PHONE ? "grid grid-cols-2" : "grid grid-cols-1"}>
+        {HAS_PHONE && (
+          <a
+            href={`tel:${PHONE_TEL}`}
+            className="flex items-center justify-center gap-2 py-3.5 text-sm font-bold text-limestone-50 transition-colors active:bg-forest-800"
+          >
+            <PhoneIcon className="h-4 w-4" aria-hidden="true" />
+            Call Now
+          </a>
+        )}
         <Link
           to="/estimate"
           className="flex items-center justify-center gap-2 bg-forest-600 py-3.5 text-sm font-bold text-white transition-colors active:bg-forest-700"
@@ -224,7 +231,7 @@ function PhoneIcon({ className }: { className?: string }) {
     <svg viewBox="0 0 20 20" fill="currentColor" className={className} aria-hidden="true">
       <path
         fillRule="evenodd"
-        d="M2 3.5A1.5 1.5 0 0 1 3.5 2h1.148a1.5 1.5 0 0 1 1.465 1.175l.716 3.223a1.5 1.5 0 0 1-1.052 1.767l-.933.267c-.41.117-.643.555-.48.95a11.542 11.542 0 0 0 6.254 6.254c.395.163.833-.07.95-.48l.267-.933a1.5 1.5 0 0 1 1.767-1.052l3.223.716A1.5 1.5 0 0 1 18 15.352V16.5a1.5 1.5 0 0 1-1.5 1.5H15c-1.149 0-2.263-.15-3.326-.43A13.022 13.022 0 0 1 2.43 8.326 13.019 13.019 0 0 1 2 5V3.5Z"
+        d="M2 3.5A1.5 1.5 0 0 1 3.5 2h1.148a1.5 1.5 0 0 1 1.465 1.175l.716 3.223a1.5 1.5 0 0 1-1.052 1.767l-.933.267c-.41.117-.643.55-.48.95a11.542 11.542 0 0 0 6.254 6.254c.395.163.833-.07.95-.48l.267-.933a1.5 1.5 0 0 1 1.767-1.052l3.223.716A1.5 1.5 0 0 1 18 15.352V16.5a1.5 1.5 0 0 1-1.5 1.5H15c-1.149 0-2.263-.15-3.326-.43A13.022 13.022 0 0 1 2.43 8.326 13.019 13.019 0 0 1 2 5V3.5Z"
         clipRule="evenodd"
       />
     </svg>

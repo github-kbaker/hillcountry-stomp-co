@@ -5,10 +5,11 @@ import type { FormEvent } from "react";
 import { submitLead } from "~/lib/lead";
 import { pageHead } from "~/lib/seo";
 import {
+  BUSINESS_PHONE,
   CITY_HUB,
   EMAIL,
+  HAS_PHONE,
   HOURS_LABEL,
-  PHONE_DISPLAY,
   PHONE_TEL,
   SERVICE_AREA,
   SITE_NAME,
@@ -19,7 +20,7 @@ export const Route = createFileRoute("/contact")({
     pageHead({
       title: `Contact Us | ${SITE_NAME} — Stump Grinding in the Texas Hill Country`,
       description:
-        "Contact Hill Country Stump Co. for professional stump grinding across the Texas Hill Country. Call, email, or send a message — free estimates for Fredericksburg, Kerrville, Boerne & more.",
+        "Contact Hill Country Stump Co. for professional stump grinding across the Texas Hill Country. Request a free estimate, email us, or send a message — serving Fredericksburg, Kerrville, Boerne & more.",
       path: "/contact",
     }),
   component: Contact,
@@ -85,17 +86,19 @@ function Contact() {
         <div className="space-y-6">
           <div className="card">
             <h2 className="font-display text-xl font-bold text-forest-900">
-              Call or email
+              {HAS_PHONE ? "Call or email" : "Email us"}
             </h2>
             <ul className="mt-4 space-y-3 text-lg">
-              <li>
-                <a
-                  href={`tel:${PHONE_TEL}`}
-                  className="inline-flex items-center gap-3 font-semibold text-forest-700 underline-offset-4 hover:underline"
-                >
-                  <span aria-hidden="true">📞</span> {PHONE_DISPLAY}
-                </a>
-              </li>
+              {HAS_PHONE && (
+                <li>
+                  <a
+                    href={`tel:${PHONE_TEL}`}
+                    className="inline-flex items-center gap-3 font-semibold text-forest-700 underline-offset-4 hover:underline"
+                  >
+                    <span aria-hidden="true">📞</span> {BUSINESS_PHONE}
+                  </a>
+                </li>
+              )}
               <li>
                 <a
                   href={`mailto:${EMAIL}`}
@@ -165,8 +168,21 @@ function Contact() {
               role="alert"
               className="mt-4 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-800"
             >
-              Something went wrong sending your message. Please try again, or
-              call us at {PHONE_DISPLAY}.
+              {HAS_PHONE ? (
+                <>
+                  Something went wrong sending your message. Please try again,
+                  or call us at {BUSINESS_PHONE}.
+                </>
+              ) : (
+                <>
+                  Something went wrong sending your message. Please try again,
+                  or email us at{" "}
+                  <a href={`mailto:${EMAIL}`} className="underline">
+                    {EMAIL}
+                  </a>
+                  .
+                </>
+              )}
             </p>
           )}
           <form onSubmit={handleSubmit} noValidate className="mt-5 space-y-4">

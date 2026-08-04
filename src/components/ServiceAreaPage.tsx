@@ -1,7 +1,8 @@
 import { Link } from "@tanstack/react-router";
 
+import { PhoneCta } from "~/components/PhoneCta";
 import { breadcrumbSchema, faqPageSchema } from "~/lib/seo";
-import { HOURS_LABEL, PHONE_DISPLAY, PHONE_TEL, SITE_NAME } from "~/lib/site";
+import { HOURS_LABEL, SITE_NAME } from "~/lib/site";
 
 /**
  * Content model for a local-SEO service-area page. Each route file supplies
@@ -84,9 +85,7 @@ export function ServiceAreaPage(c: ServiceAreaContent) {
             <Link to="/estimate" className="btn-secondary">
               Get Free Estimate
             </Link>
-            <a href={`tel:${PHONE_TEL}`} className="btn-outline-light">
-              Call Now — {PHONE_DISPLAY}
-            </a>
+            <PhoneCta className="btn-outline-light" />
           </div>
         </div>
       </section>
@@ -224,7 +223,14 @@ export function ServiceAreaPage(c: ServiceAreaContent) {
         </ul>
         <p className="mt-6 text-sm text-charcoal-500">
           We also serve Comfort, Johnson City, Blanco, Stonewall, Harper, and
-          more — call {PHONE_DISPLAY} to ask about your town.
+          more —{" "}
+          <Link
+            to="/estimate"
+            className="font-semibold text-forest-700 underline underline-offset-2"
+          >
+            request a free estimate
+          </Link>{" "}
+          to ask about your town.
         </p>
       </section>
 
@@ -270,16 +276,14 @@ export function ServiceAreaPage(c: ServiceAreaContent) {
             Ready to remove that stump in {c.city}?
           </h2>
           <p className="mx-auto mt-3 max-w-xl text-lg text-limestone-200">
-            Send us a few photos and get your free estimate — or just call and
-            talk it through.
+            Send us a few photos and get your free estimate — we'll get back to
+            you quickly.
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
             <Link to="/estimate" className="btn-secondary">
               Get Free Estimate
             </Link>
-            <a href={`tel:${PHONE_TEL}`} className="btn-outline-light">
-              Call {PHONE_DISPLAY}
-            </a>
+            <PhoneCta className="btn-outline-light" />
           </div>
           <p className="mt-6 text-sm text-limestone-200">
             Open {HOURS_LABEL} ·{" "}

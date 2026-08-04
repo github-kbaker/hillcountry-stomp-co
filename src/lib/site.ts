@@ -4,11 +4,19 @@
  * Every page, header, footer, and SEO tag reads phone / email / hours / service
  * area from this file, so there is exactly one place to update them.
  *
- * ⚠️ PLACEHOLDERS — the owner has not provided real values yet:
- *   - PHONE_DISPLAY / PHONE_TEL  : (830) 555-0134 / +18305550134
- *   - EMAIL                      : hello@hillcountrystumpco.com (placeholder domain)
- *   - HOURS_LABEL                : Mon–Sat, 8:00 AM – 6:00 PM
- * Swap in the real values here and they update everywhere on the site.
+ * BUSINESS_PHONE — the owner's phone number and the ONLY phone setting to edit.
+ * It defaults to EMPTY, which turns the phone OFF across the whole site: no
+ * number text, no tel: links, and no call CTAs anywhere. Every call button
+ * becomes a "Get Free Estimate" link, and LocalBusiness JSON-LD omits the
+ * `telephone` property.
+ *
+ * Set BUSINESS_PHONE to the real number (e.g. "(###) ###-####") and the number
+ * automatically lights up in the header, footer, Contact page, and hero, tel:
+ * links start working, and `telephone` is added to the LocalBusiness schema on
+ * the Home and Contractor Partnerships pages. No other file needs to change.
+ *
+ * EMAIL and HOURS_LABEL are still placeholders the owner will confirm; they are
+ * outside the scope of the phone rollout.
  */
 
 export const SITE_NAME = "Hill Country Stump Co.";
@@ -18,10 +26,32 @@ export const SITE_TAGLINE =
 /** Published preview domain — used as the canonical base URL for SEO tags. */
 export const SITE_URL = "https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app";
 
-/** PLACEHOLDER — display phone number (owner to confirm). */
-export const PHONE_DISPLAY = "(830) 555-0134";
-/** PLACEHOLDER — phone in E.164 tel: format (owner to confirm). */
-export const PHONE_TEL = "+18305550134";
+/**
+ * The business phone number exactly as it should be displayed, e.g. "(###) ###-####".
+ * Defaults to "" — while empty, no phone number, tel: link, or call CTA appears
+ * anywhere on the site, and every call button shows "Get Free Estimate" instead.
+ */
+export const BUSINESS_PHONE = "";
+
+/**
+ * True when a real phone number is configured. This is the single condition
+ * every consumer uses to decide whether to show phone UI or the estimate flow.
+ */
+export const HAS_PHONE = BUSINESS_PHONE.trim().length > 0;
+
+/**
+ * Derive an E.164 href (for tel: links) from a display phone number: strip all
+ * non-digits, and prefix the US country code when the result is a 10-digit
+ * number. Returns "" for empty or unparseable input so a tel: link is never
+ * emitted without a configured number.
+ */
+function toE164(display: string): string {
+  const digits = display.replace(/\D/g, "");
+  return digits.length === 10 ? `+1${digits}` : "";
+}
+
+/** Phone in E.164 format for tel: links — "" when no phone is configured. */
+export const PHONE_TEL = toE164(BUSINESS_PHONE);
 
 /** PLACEHOLDER — email (owner to confirm). */
 export const EMAIL = "hello@hillcountrystumpco.com";

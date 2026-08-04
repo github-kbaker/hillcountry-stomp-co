@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 
+import { PhoneCta } from "~/components/PhoneCta";
 import { pageHead } from "~/lib/seo";
 import {
   CITY_HUB,
   EMAIL,
+  HAS_PHONE,
   HOURS_LABEL,
-  PHONE_DISPLAY,
   PHONE_TEL,
   SERVICE_AREA,
   SERVICE_AREA_PAGES,
@@ -136,7 +137,7 @@ function localBusinessSchema() {
     description:
       "Professional stump grinding service for the Texas Hill Country — residential, commercial, and ranch.",
     url: SITE_URL,
-    telephone: PHONE_TEL,
+    ...(HAS_PHONE ? { telephone: PHONE_TEL } : {}),
     email: EMAIL,
     priceRange: "$$",
     openingHoursSpecification: [
@@ -187,9 +188,7 @@ function Hero() {
           <Link to="/estimate" className="btn-primary">
             Get Free Estimate
           </Link>
-          <a href={`tel:${PHONE_TEL}`} className="btn-secondary">
-            Call Now — {PHONE_DISPLAY}
-          </a>
+          <PhoneCta className="btn-secondary" />
         </div>
         <p className="mt-6 text-sm text-limestone-200">
           Locally owned and operated · Free estimates · Backyards to ranch land
@@ -341,8 +340,14 @@ function ServiceArea() {
           })}
         </ul>
         <p className="mt-8 max-w-2xl text-sm text-charcoal-500">
-          Don't see your town? We cover a wide radius around the Hill Country —
-          give us a call and we'll let you know if we can get to you.
+          Don't see your town? We cover a wide radius around the Hill Country —{" "}
+          <Link
+            to="/estimate"
+            className="font-semibold text-forest-700 underline underline-offset-2"
+          >
+            request a free estimate
+          </Link>{" "}
+          and we'll let you know if we can get to you.
         </p>
       </div>
     </section>
@@ -357,16 +362,14 @@ function CtaBand() {
           Ready to remove that stump?
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-lg text-limestone-200">
-          Send us a few photos and get your free estimate — or just call and
-          talk it through.
+          Send us a few photos and get your free estimate — we'll get back to
+          you quickly.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
           <Link to="/estimate" className="btn-secondary">
             Get Free Estimate
           </Link>
-          <a href={`tel:${PHONE_TEL}`} className="btn-outline-light">
-            Call {PHONE_DISPLAY}
-          </a>
+          <PhoneCta className="btn-outline-light" />
         </div>
         <p className="mt-6 text-sm text-limestone-200">
           Open {HOURS_LABEL}

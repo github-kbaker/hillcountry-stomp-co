@@ -2,11 +2,13 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 
+import { PhoneCta } from "~/components/PhoneCta";
 import { submitLead } from "~/lib/lead";
 import { breadcrumbSchema, pageHead } from "~/lib/seo";
 import {
+  BUSINESS_PHONE,
   EMAIL,
-  PHONE_DISPLAY,
+  HAS_PHONE,
   PHONE_TEL,
   SITE_NAME,
   SITE_URL,
@@ -17,7 +19,7 @@ export const Route = createFileRoute("/contractors")({
     pageHead({
       title: `Stump Grinding Contractor Partnerships | ${SITE_NAME}`,
       description:
-        "Contractor partnerships for dependable stump grinding: overflow jobs, subcontract work, emergency service, and rural coverage across the Texas Hill Country. Call or send a partnership inquiry.",
+        "Contractor partnerships for dependable stump grinding: overflow jobs, subcontract work, emergency service, and rural coverage across the Texas Hill Country. Send a partnership inquiry.",
       path: "/contractors",
     }),
   component: Contractors,
@@ -34,7 +36,7 @@ const OFFERS = [
   },
   {
     title: "Emergency Service",
-    desc: "Storm damage and emergency removals leave stumps behind in a hurry. Call us and we'll work urgent stump work into the schedule as capacity allows, and give you a straight answer on timing right away.",
+    desc: "Storm damage and emergency removals leave stumps behind in a hurry. Send the details and we'll work urgent stump work into the schedule as capacity allows, and give you a straight answer on timing right away.",
   },
   {
     title: "Rural Service / Outlying Areas",
@@ -64,7 +66,7 @@ const TRADE_TYPES = [
 const STEPS = [
   {
     title: "Send us job details",
-    desc: "Share the address, photos, access notes, and your schedule window — by phone, email, or the form below.",
+    desc: "Share the address, photos, access notes, and your schedule window — by email or the form below.",
   },
   {
     title: "We confirm schedule & price",
@@ -150,7 +152,7 @@ function professionalServiceSchema() {
     description:
       "Stump grinding partnership for trade partners: overflow jobs, subcontract work, emergency service, and rural coverage across the Texas Hill Country.",
     url: `${SITE_URL}/contractors`,
-    telephone: PHONE_TEL,
+    ...(HAS_PHONE ? { telephone: PHONE_TEL } : {}),
     email: EMAIL,
     priceRange: "$$",
     areaServed: { "@type": "Place", name: "Texas Hill Country" },
@@ -193,9 +195,7 @@ function Hero() {
           sites, with a clean finish.
         </p>
         <div className="mt-8 flex flex-wrap items-center gap-3">
-          <a href={`tel:${PHONE_TEL}`} className="btn-secondary">
-            Call {PHONE_DISPLAY}
-          </a>
+          <PhoneCta className="btn-secondary" />
           <a href="#partner-form" className="btn-outline-light">
             Send a Partnership Inquiry
           </a>
@@ -387,11 +387,11 @@ function PartnerForm() {
         return;
       }
       setFormError(
-        "Something went wrong saving your inquiry. Please try again or call us.",
+        `Something went wrong saving your inquiry. Please try again or email us at ${EMAIL}.`,
       );
     } catch {
       setFormError(
-        "Network error — please try again, or call us directly and we'll take your details over the phone.",
+        `Network error — please try again, or email us at ${EMAIL} and we'll take your details from there.`,
       );
     } finally {
       setSubmitting(false);
@@ -423,9 +423,7 @@ function PartnerForm() {
             </span>
           </p>
           <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-            <a href={`tel:${PHONE_TEL}`} className="btn-primary">
-              Call {PHONE_DISPLAY}
-            </a>
+            <PhoneCta className="btn-primary" />
             <Link to="/" className="btn-charcoal">
               Back to Home
             </Link>
@@ -449,18 +447,33 @@ function PartnerForm() {
               get back to you by phone or email.
             </p>
             <ul className="mt-8 space-y-4 text-sm text-charcoal-700">
-              <li className="flex gap-3">
-                <span aria-hidden="true">📞</span>
-                <span>
-                  Prefer to talk it through? Call{" "}
-                  <a
-                    href={`tel:${PHONE_TEL}`}
-                    className="font-semibold text-forest-700 underline underline-offset-2"
-                  >
-                    {PHONE_DISPLAY}
-                  </a>
-                </span>
-              </li>
+              {HAS_PHONE ? (
+                <li className="flex gap-3">
+                  <span aria-hidden="true">📞</span>
+                  <span>
+                    Prefer to talk it through? Call{" "}
+                    <a
+                      href={`tel:${PHONE_TEL}`}
+                      className="font-semibold text-forest-700 underline underline-offset-2"
+                    >
+                      {BUSINESS_PHONE}
+                    </a>
+                  </span>
+                </li>
+              ) : (
+                <li className="flex gap-3">
+                  <span aria-hidden="true">📝</span>
+                  <span>
+                    Prefer to get started?{" "}
+                    <Link
+                      to="/estimate"
+                      className="font-semibold text-forest-700 underline underline-offset-2"
+                    >
+                      Request a free estimate
+                    </Link>
+                  </span>
+                </li>
+              )}
               <li className="flex gap-3">
                 <span aria-hidden="true">✉️</span>
                 <span>
@@ -705,13 +718,10 @@ function CtaBand() {
           Let's talk stump work
         </h2>
         <p className="mx-auto mt-3 max-w-xl text-lg text-limestone-200">
-          Call now to talk through your first job — or send the inquiry form
-          above and we'll be in touch.
+          Send the inquiry form above and we'll be in touch.
         </p>
         <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-          <a href={`tel:${PHONE_TEL}`} className="btn-secondary">
-            Call {PHONE_DISPLAY}
-          </a>
+          <PhoneCta className="btn-secondary" />
           <a href="#partner-form" className="btn-outline-light">
             Send a Partnership Inquiry
           </a>

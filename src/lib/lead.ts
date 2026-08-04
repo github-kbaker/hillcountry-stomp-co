@@ -1,5 +1,5 @@
 import { createServerFn } from "@tanstack/react-start";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { sql } from "~/db";
@@ -180,10 +180,10 @@ export const submitLead = createServerFn({ method: "POST" }).handler(
 
     if (stored === "file") {
       await mkdir(LEADS_DIR, { recursive: true });
-      await writeFile(
-        join(LEADS_DIR, `${id}.json`),
-        JSON.stringify(payload, null, 2),
-      );
+      const target = join(LEADS_DIR, `${id}.json`);
+      const temp = `${target}.tmp`;
+      await writeFile(temp, JSON.stringify(payload, null, 2));
+      await rename(temp, target);
     }
 
     return { ok: true, id, stored };

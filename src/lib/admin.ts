@@ -1,6 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { createHmac, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 
 import { sql } from "~/db";
@@ -239,8 +239,13 @@ async function writeLeadPayload(id: string, payload: Record<string, unknown>): P
     catch (err) { console.error("[admin] DATABASE update failed, trying file:", err); }
   }
   await mkdir(LEADS_DIR, { recursive: true });
-  await writeFile(join(LEADS_DIR, `${id}.json`), JSON.stringify(payload, null, 2));
+  const target = join(LEADS_DIR, `${id}.json`);
+  const temp = `${target}.tmp`;
+  await writeFile(temp, JSON.stringify(payload, null, 2));
+  await rename(temp, target);
 }
+
+const leadWriteQueues = new Map<string, Promise<void>>();
 
 async function readAllLeads(): Promise<LeadRow[]> {
   if (process.env.DATABASE_URL) {
@@ -269,7 +274,7 @@ async function readAllLeads(): Promise<LeadRow[]> {
       ) as Record<string, unknown>;
       leads.push(toLeadRow(payload));
     } catch (err) {
-      console.error(`[admin] failed to read lead file ${file}:`, err);
+      console.warn(`[admin] skipping unreadable lead file ${file}:`, err);
     }
   }
   return leads.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
@@ -386,15 +391,26 @@ export const updateLead = createServerFn({ method: "POST" }).handler(
   async ({ data }: { data: { id: string; patch: Record<string, unknown> } }) => {
     if (!(await isAuthenticated())) return unauthorizedResponse();
     const id = String(data.id ?? "");
-    const existing = await readLeadPayload(id);
-    if (!existing) return jsonResponse({ error: "not_found" }, 404);
     const patch = data.patch ?? {};
     if (patch.status && !(LEAD_STATUSES as readonly string[]).includes(String(patch.status))) return jsonResponse({ error: "invalid_status" }, 400);
     const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status"];
-    const next = { ...existing };
-    for (const key of allowed) if (key in patch) next[key] = patch[key];
-    await writeLeadPayload(id, next);
-    return { ok: true, lead: next };
+    let result: Record<string, unknown> | null = null;
+    let failure: Response | null = null;
+    const previous = leadWriteQueues.get(id) ?? Promise.resolve();
+    const current = previous.then(async () => {
+      const existing = await readLeadPayload(id);
+      if (!existing) { failure = jsonResponse({ error: "not_found" }, 404); return; }
+      const next = { ...existing };
+      for (const key of allowed) if (key in patch) next[key] = patch[key];
+      await writeLeadPayload(id, next);
+      result = next;
+    });
+    leadWriteQueues.set(id, current);
+    try { await current; } finally {
+      if (leadWriteQueues.get(id) === current) leadWriteQueues.delete(id);
+    }
+    if (failure) return failure;
+    return { ok: true, lead: result };
   },
 );
 

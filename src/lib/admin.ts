@@ -5,6 +5,9 @@ import { basename, join } from "node:path";
 
 import { sql } from "~/db";
 import { sendEmail, logEmail } from "./email";
+import type { EmailHistoryEntry, EmailState } from "./email";
+import PDFDocument from "pdfkit";
+import { SITE_URL } from "./site";
 import { DEFAULT_LEAD_STATUS, LEAD_STATUSES } from "./admin-meta";
 import type { LeadListResult, LeadRow, LeadStatus } from "./admin-meta";
 
@@ -282,6 +285,25 @@ async function readAllLeads(): Promise<LeadRow[]> {
   return leads.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 }
 
+function money(v: unknown) { const n = Number(String(v ?? "").replace(/[$,]/g, "")); return Number.isFinite(n) ? `${n.toFixed(2)}` : String(v || "—"); }
+function esc(v: unknown) { return String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c] as string)); }
+async function estimatePdf(lead: Record<string, unknown>) {
+  const chunks: Buffer[] = []; const doc = new PDFDocument({ size: "LETTER", margin: 48 });
+  doc.on("data", (c: Buffer) => chunks.push(c));
+  const done = new Promise<Buffer>((resolve, reject) => { doc.on("end", () => resolve(Buffer.concat(chunks))); doc.on("error", reject); });
+  doc.rect(0, 0, 612, 72).fill("#235b3a").fillColor("white").font("Helvetica-Bold").fontSize(20).text("Hill Country Stump Co.", 48, 25);
+  doc.fillColor("#222").font("Helvetica-Bold").fontSize(22).text("Estimate", 48, 105); doc.font("Helvetica").fontSize(11).text(`${String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer")} · Ref ${lead.id}`, 48, 140);
+  doc.moveTo(48, 175).lineTo(564, 175).stroke("#d8cbb5");
+  [["Estimate amount", money(lead.estimate)], ["Deposit due", money(lead.deposit)], ["Balance due", money(lead.balance)]].forEach(([k,v],i) => { const y=195+i*32; doc.font("Helvetica-Bold").text(k,48,y).font("Helvetica").text(v,400,y); });
+  if (lead.notes) doc.font("Helvetica-Bold").text("Notes",48,310).font("Helvetica").text(String(lead.notes),48,330,{width:516});
+  doc.fontSize(9).fillColor("#666").text("Hill Country Stump Co. · hello@hillcountrystumpco.com",48,730); doc.end(); return done;
+}
+async function sendWithRetry(leadId: string, recipient: string, subject: string, html: string, text: string, attachments?: Array<{filename:string;content:string}>, replyTo?: string) {
+  let retryCount=0; let result=await sendEmail({to:recipient,subject,html,text,attachments,replyTo}); await logEmail({leadId,recipient,subject,httpStatus:result.status,messageId:result.messageId,error:result.error,retryCount,event:result.error === "RESEND_API_KEY not configured" ? "not-configured" : "attempt"});
+  if (!result.ok && result.error !== "RESEND_API_KEY not configured") { retryCount=1; result=await sendEmail({to:recipient,subject,html,text,attachments,replyTo}); await logEmail({leadId,recipient,subject,httpStatus:result.status,messageId:result.messageId,error:result.error,retryCount,event:result.ok?"success":"failed"}); } else if(result.ok) await logEmail({leadId,recipient,subject,httpStatus:result.status,messageId:result.messageId,error:null,retryCount,event:"success"});
+  return {result,retryCount};
+}
+
 /* ------------------------------------------------------------------ */
 /* Server functions (client-visible stubs)                             */
 /* ------------------------------------------------------------------ */
@@ -395,6 +417,37 @@ export const listLeads = createServerFn({ method: "POST" }).handler(
  * Delete a lead (used for lifecycle testing and housekeeping). REQUIRES a
  * valid session; returns 401 when unauthenticated.
  */
+export const sendEstimate = createServerFn({ method: "POST" }).handler(async ({ data }: { data: { id: string } }) => {
+  if (!(await isAuthenticated())) return unauthorizedResponse();
+  const id = String(data.id ?? ""); const lead = await readLeadPayload(id); if (!lead) return jsonResponse({ error: "not_found" }, 404);
+  const recipient = String(lead.email ?? ""); if (!recipient) throw new Error("This lead has no customer email.");
+  if (!String(lead.estimate ?? "").trim()) throw new Error("Enter an estimate amount before sending.");
+  const token = randomBytes(24).toString("hex");
+  const seeded = { ...lead, email_history: Array.isArray(lead.email_history) ? lead.email_history : [], approval_token: token, approved_at: lead.approved_at ?? null, paymentLink: lead.paymentLink ?? null };
+  await writeLeadPayload(id, seeded);
+  const name = String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer"); const subject = "Your estimate from Hill Country Stump Co."; const approveUrl = `${SITE_URL}/estimate/${id}?token=${token}`; const pay = String(lead.paymentLink ?? "");
+  const html = `<div style="font-family:Arial;color:#222"><div style="background:#235b3a;color:#fff;padding:28px"><strong style="font-size:22px">Hill Country Stump Co.</strong><br/>Stump grinding across the Texas Hill Country</div><div style="padding:28px"><h1>Estimate for ${esc(name)}</h1><p style="color:#666;font-size:12px">Reference ${esc(id)}</p><table style="width:100%;max-width:500px;border-collapse:collapse"><tr><td>Estimate amount</td><td>${money(lead.estimate)}</td></tr><tr><td>Deposit due</td><td>${money(lead.deposit)}</td></tr><tr><td>Balance due</td><td>${money(lead.balance)}</td></tr></table>${lead.notes ? `<p><strong>Notes</strong><br/>${esc(lead.notes)}</p>` : ""}<p><a href="${approveUrl}" style="display:inline-block;background:#235b3a;color:#fff;padding:14px 22px;border-radius:6px;text-decoration:none">Approve Estimate</a></p>${pay ? `<p><a href="${esc(pay)}" style="display:inline-block;background:#8b5e3c;color:#fff;padding:14px 22px;border-radius:6px;text-decoration:none">Pay Online</a></p>` : ""}<p>Questions? Reply to this email and we'll get right back to you.</p></div><footer style="color:#777;padding:20px">Hill Country Stump Co. · hello@hillcountrystumpco.com</footer></div>`;
+  const text = `Estimate for ${name}\nReference: ${id}\nEstimate amount: ${money(lead.estimate)}\nDeposit due: ${money(lead.deposit)}\nBalance due: ${money(lead.balance)}\n${lead.notes ? `Notes: ${lead.notes}\n` : ""}\nApprove Estimate: ${approveUrl}${pay ? `\nPay Online: ${pay}` : ""}\nQuestions? Reply to this email and we'll get right back to you.`;
+  const pdf = await estimatePdf(lead); const sent = await sendWithRetry(id, recipient, subject, html, text, [{ filename: `estimate-${id.slice(0,8)}.pdf`, content: pdf.toString("base64") }], "hello@hillcountrystumpco.com");
+  const now = new Date().toISOString(); const entry: EmailHistoryEntry = { id: randomBytes(16).toString("hex"), type: "estimate-sent", subject, recipient, status: !process.env.RESEND_API_KEY ? "not-configured" : sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now, attachment: "pdf" };
+  const next = { ...seeded, email: { status: entry.status, recipient, subject, messageId: entry.messageId ?? null, error: entry.error ?? null, retryCount: entry.retryCount, sentAt: entry.status === "sent" ? now : null, lastAttemptAt: now }, email_history: [...(seeded.email_history as unknown[]), entry] };
+  if (sent.result.ok && (["new", "pending-estimate"] as string[]).includes(String(next.status))) next.status = "estimate-sent";
+  await writeLeadPayload(id, next); return { ok: sent.result.ok, messageId: sent.result.messageId, error: sent.result.error, lead: next };
+});
+
+export const getEstimateView = createServerFn({ method: "POST" }).handler(async ({ data }: { data: { id: string; token: string } }) => {
+  const lead = await readLeadPayload(String(data.id ?? "")); if (!lead || !data.token || data.token !== lead.approval_token) return { ok: false };
+  return { ok: true, name: String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer"), id: String(lead.id ?? data.id), estimate: lead.estimate ?? "", deposit: lead.deposit ?? "", balance: lead.balance ?? "", notes: lead.notes ?? "", paymentLink: lead.paymentLink ?? null, approvedAt: lead.approved_at ?? null };
+});
+
+export const approveEstimate = createServerFn({ method: "POST" }).handler(async ({ data }: { data: { id: string; token: string } }) => {
+  const id = String(data.id ?? ""); const lead = await readLeadPayload(id); if (!lead || !data.token || data.token !== lead.approval_token) return { ok: false, error: "invalid_link" };
+  const approvedAt = new Date().toISOString(); const next = { ...lead, status: ["new", "pending-estimate", "estimate-sent"].includes(String(lead.status)) ? "approved" : lead.status, approved_at: approvedAt, approval_token: null, email_history: Array.isArray(lead.email_history) ? lead.email_history : [] };
+  const recipient = process.env.FORWARD_EMAIL || ""; const subject = `Estimate approved — ${String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer")}`; const adminLink = `${SITE_URL}/admin/lead/${id}`; let entry: EmailHistoryEntry | null = null;
+  if (recipient) { const sent = await sendWithRetry(id, recipient, subject, `<p>Estimate approved.</p><p><a href="${adminLink}">Open lead in admin</a></p>`, `Estimate approved. Admin lead page: ${adminLink}`, undefined, String(lead.email ?? "")); const now = new Date().toISOString(); entry = { id: randomBytes(16).toString("hex"), type: "estimate-approved-notice", subject, recipient, status: sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now }; } else { await logEmail({leadId:id,recipient:"",subject,error:"FORWARD_EMAIL not configured",retryCount:0,event:"not-configured"}); }
+  if (entry) next.email_history = [...next.email_history, entry]; await writeLeadPayload(id, next); return { ok: true };
+});
+
 export const getLead = createServerFn({ method: "POST" }).handler(
   async ({ data }: { data: { id: string } }) => {
     if (!(await isAuthenticated())) return unauthorizedResponse();
@@ -409,7 +462,7 @@ export const updateLead = createServerFn({ method: "POST" }).handler(
     const id = String(data.id ?? "");
     const patch = data.patch ?? {};
     if (patch.status && !(LEAD_STATUSES as readonly string[]).includes(String(patch.status))) return jsonResponse({ error: "invalid_status" }, 400);
-    const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status", "email"];
+    const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status", "email", "paymentLink"];
     let result: Record<string, unknown> | null = null;
     let failure: Response | null = null;
     const previous = leadWriteQueues.get(id) ?? Promise.resolve();

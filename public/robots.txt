@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app/sitemap.xml
+Sitemap: https://www.hillcountrystumpco.com/sitemap.xml

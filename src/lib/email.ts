@@ -5,7 +5,13 @@ export type EmailResult = { ok: boolean; status: number; messageId: string | nul
 export type LeadEmail = { id: string; name?: string; company?: string; contact_name?: string; email?: string; phone?: string; city?: string; notes?: string; address?: string; kind?: string };
 export type EmailState = { status: "sent" | "failed" | "not-configured" | "pending"; recipient: string; subject: string; messageId: string | null; error: string | null; retryCount: number; sentAt: string | null; lastAttemptAt: string | null };
 
-const cfg = () => ({ key: process.env.RESEND_API_KEY ?? "", from: process.env.FROM_EMAIL || "", forward: process.env.FORWARD_EMAIL || "", business: process.env.BUSINESS_EMAIL || "" });
+const cfg = () => ({
+  key: process.env.RESEND_API_KEY ?? "",
+  from: process.env.FROM_EMAIL || "",
+  business: process.env.BUSINESS_EMAIL || "",
+  replyTo: process.env.REPLY_TO_EMAIL || process.env.BUSINESS_EMAIL || "",
+  forward: process.env.FORWARD_EMAIL || "",
+});
 
 export async function sendEmail({ to, subject, html, text, body, replyTo }: { to: string; subject: string; html?: string; text?: string; body?: string; replyTo?: string }): Promise<EmailResult> {
   const { key, from } = cfg();
@@ -42,13 +48,13 @@ export async function sendEstimateEmails(lead: LeadEmail): Promise<{ business: E
   const subject = `New estimate request — ${customerName}`;
   let business: EmailResult | null = null; let br = 0;
   if (c.forward) {
-    const r = await attempt(lead, c.forward, subject, `<p>New estimate request</p><p>Reference: ${lead.id}<br>Name: ${lead.name ?? ""}<br>Email: ${lead.email ?? ""}<br>Phone: ${lead.phone ?? ""}<br>Town: ${lead.city ?? ""}<br>Service notes: ${lead.notes ?? ""}</p><p>Admin lead page: /admin/lead/${lead.id}</p>`, `New estimate request\nReference: ${lead.id}\nName: ${lead.name ?? ""}\nEmail: ${lead.email ?? ""}\nPhone: ${lead.phone ?? ""}\nTown: ${lead.city ?? ""}\nService notes: ${lead.notes ?? ""}\nAdmin lead page: /admin/lead/${lead.id}`, c.business);
+    const r = await attempt(lead, c.forward, subject, `<p>New estimate request</p><p>Reference: ${lead.id}<br>Name: ${lead.name ?? ""}<br>Email: ${lead.email ?? ""}<br>Phone: ${lead.phone ?? ""}<br>Town: ${lead.city ?? ""}<br>Service notes: ${lead.notes ?? ""}</p><p>Admin lead page: /admin/lead/${lead.id}</p>`, `New estimate request\nReference: ${lead.id}\nName: ${lead.name ?? ""}\nEmail: ${lead.email ?? ""}\nPhone: ${lead.phone ?? ""}\nTown: ${lead.city ?? ""}\nService notes: ${lead.notes ?? ""}\nAdmin lead page: /admin/lead/${lead.id}`, lead.email || c.replyTo);
     business = r.result; br = r.retryCount;
   } else await logEmail({ leadId: lead.id, customerName, recipient: "", subject, httpStatus: 0, messageId: null, error: "FORWARD_EMAIL not configured", retryCount: 0, event: "not-configured" });
   const cs = "We received your estimate request — Hill Country Stump Co.";
   let customer: EmailResult | null = null; let cr = 0;
   if (lead.email) {
-    const r = await attempt(lead, lead.email, cs, `<p>Thank you for contacting Hill Country Stump Co.</p><p>Reference: ${lead.id}</p><p>We received your estimate request and we'll get back to you.</p>`, `Thank you for contacting Hill Country Stump Co.\nReference: ${lead.id}\nWe received your estimate request and we'll get back to you.`, c.business);
+    const r = await attempt(lead, lead.email, cs, `<p>Thank you for contacting Hill Country Stump Co.</p><p>Reference: ${lead.id}</p><p>We received your estimate request and we'll get back to you.</p>`, `Thank you for contacting Hill Country Stump Co.\nReference: ${lead.id}\nWe received your estimate request and we'll get back to you.`, c.replyTo);
     customer = r.result; cr = r.retryCount;
   }
   const final = business ?? customer; const status = !c.key ? "not-configured" : final?.ok ? "sent" : "failed";

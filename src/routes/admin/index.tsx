@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 
-import { getSession, listLeads, logout } from "~/lib/admin";
+import { getSession, listLeads, logout, sendTestEmail } from "~/lib/admin";
 import { LEAD_SOURCES, LEAD_STATUSES } from "~/lib/admin-meta";
 import type { LeadListResult, LeadRow, LeadStatus } from "~/lib/admin-meta";
 import { SITE_NAME } from "~/lib/site";
@@ -101,6 +101,8 @@ function AdminDashboard() {
 
   const { data, status, source } = state;
   const counts = data?.counts;
+  const [testState, setTestState] = useState("");
+  async function runTestEmail() { setTestState("Sending…"); try { const r = await sendTestEmail(); if (r instanceof Response) setTestState("Unauthorized"); else setTestState(r.ok ? `Success (${r.messageId ?? "no message ID"})` : (r.error ?? "Email failed")); } catch (e) { setTestState(e instanceof Error ? e.message : String(e)); } }
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
@@ -120,10 +122,10 @@ function AdminDashboard() {
             )}
           </p>
         </div>
-        <button onClick={onLogout} className="btn-charcoal px-4 py-2 text-sm">
-          Sign Out
-        </button>
+        <div className="flex items-center gap-2"><button onClick={runTestEmail} className="btn-primary px-4 py-2 text-sm">Send Test Email</button><button onClick={onLogout} className="btn-charcoal px-4 py-2 text-sm">Sign Out</button></div>
       </div>
+      {testState && <div role="status" className="mt-3 rounded-lg border border-limestone-300 bg-limestone-50 px-4 py-3 text-sm">{testState}</div>}
+
 
       {/* Pipeline status tabs */}
       <div className="mt-6 flex flex-wrap gap-1.5">
@@ -230,7 +232,7 @@ function AdminDashboard() {
                         <Utm utm={lead.utm} />
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={lead.status} />
+                        <StatusBadge status={lead.status} /> <EmailBadge status={lead.email?.status} />
                       </td>
                       <td className="px-4 py-3 text-charcoal-500">
                         {formatDate(lead.created_at)}
@@ -281,7 +283,7 @@ function LeadCard({ lead }: { lead: LeadRow }) {
         >
           {lead.name || "(no name)"}
         </Link>
-        <StatusBadge status={lead.status} />
+        <StatusBadge status={lead.status} /> <EmailBadge status={lead.email?.status} />
       </div>
       <div className="mt-2 space-y-1 text-sm text-charcoal-700">
         <div>
@@ -313,6 +315,12 @@ function KindBadge({ kind }: { kind: string }) {
       {kind}
     </span>
   );
+}
+
+function EmailBadge({ status }: { status?: string }) {
+  const value = status ?? "pending";
+  const cls = value === "sent" ? "bg-forest-100 text-forest-900" : value === "failed" ? "bg-red-100 text-red-800" : "bg-limestone-200 text-charcoal-700";
+  return <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${cls}`}>email: {value}</span>;
 }
 
 function StatusBadge({ status }: { status: LeadStatus }) {

@@ -3,6 +3,7 @@ import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { sql } from "~/db";
+import { sendEstimateEmails } from "./email";
 
 /**
  * Lead capture for the Free Estimate form, the Contact form, and the
@@ -186,6 +187,18 @@ export const submitLead = createServerFn({ method: "POST" }).handler(
       await rename(temp, target);
     }
 
+    let email;
+    try {
+      const sent = await sendEstimateEmails(payload);
+      email = sent.state;
+      if (stored === "database" && process.env.DATABASE_URL) {
+        try { const db = sql(); await db`update leads set payload = ${JSON.stringify({ ...payload, email })} where id = ${id}`; }
+        catch (err) { console.error(`[lead] email state database update failed for ${id}:`, err); }
+      } else {
+        const target = join(LEADS_DIR, `${id}.json`); const temp = `${target}.tmp`;
+        await writeFile(temp, JSON.stringify({ ...payload, email }, null, 2)); await rename(temp, target);
+      }
+    } catch (err) { console.error(`[lead] email flow failed for ${id}:`, err); email = { status: "failed", recipient: process.env.FORWARD_EMAIL || "", subject: `New estimate request — ${payload.name ?? payload.company ?? "New lead"}`, messageId: null, error: err instanceof Error ? err.message : String(err), retryCount: 0, sentAt: null, lastAttemptAt: new Date().toISOString() }; }
     return { ok: true, id, stored };
   },
 );

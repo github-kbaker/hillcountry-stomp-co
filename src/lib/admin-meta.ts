@@ -53,6 +53,7 @@ export type LeadRow = {
   utm: { source: string; medium: string; campaign: string };
   created_at: string;
   num_stumps: string;
+  email_status?: { status?: string; recipient?: string; subject?: string; messageId?: string | null; error?: string | null; retryCount?: number; sentAt?: string | null; lastAttemptAt?: string | null };
 };
 
 export type LeadListResult = {

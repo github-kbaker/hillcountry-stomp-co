@@ -23,8 +23,8 @@ export const SITE_NAME = "Hill Country Stump Co.";
 export const SITE_TAGLINE =
   "Professional stump grinding for the Texas Hill Country";
 
-/** Published preview domain — used as the canonical base URL for SEO tags. */
-export const SITE_URL = "https://03018e6f087ad697c7b5bbd1c71cadd6.ctonew.app";
+/** Production domain — used as the canonical base URL for SEO tags and links. */
+export const SITE_URL = "https://www.hillcountrystumpco.com";
 
 /**
  * The business phone number exactly as it should be displayed, e.g. "(###) ###-####".

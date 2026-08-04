@@ -11,6 +11,7 @@
 export const LEAD_STATUSES = [
   "new",
   "pending-estimate",
+  "estimate-sent",
   "approved",
   "deposit-pending",
   "deposit-paid",

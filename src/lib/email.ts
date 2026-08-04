@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { SITE_URL } from "./site";
 
 export type EmailResult = { ok: boolean; status: number; messageId: string | null; error: string | null };
+export type EmailHistoryEntry = { id: string; type: "estimate-sent" | "lead-notification" | "customer-confirmation" | "estimate-approved-notice" | "test" | "other"; subject: string; recipient: string; status: "sent" | "failed" | "not-configured"; messageId?: string | null; error?: string | null; retryCount: number; sentAt: string; attachment?: "pdf" | null };
 export type LeadEmail = { id: string; name?: string; company?: string; contact_name?: string; email?: string; phone?: string; city?: string; notes?: string; address?: string; kind?: string };
 export type EmailState = { status: "sent" | "failed" | "not-configured" | "pending"; recipient: string; subject: string; messageId: string | null; error: string | null; retryCount: number; sentAt: string | null; lastAttemptAt: string | null };
 
@@ -14,12 +15,12 @@ const cfg = () => ({
   forward: process.env.FORWARD_EMAIL || "",
 });
 
-export async function sendEmail({ to, subject, html, text, body, replyTo }: { to: string; subject: string; html?: string; text?: string; body?: string; replyTo?: string }): Promise<EmailResult> {
+export async function sendEmail({ to, subject, html, text, body, replyTo, attachments }: { to: string; subject: string; html?: string; text?: string; body?: string; replyTo?: string; attachments?: Array<{ filename: string; content: string }> }): Promise<EmailResult> {
   const { key, from } = cfg();
   if (!key) return { ok: false, status: 0, messageId: null, error: "RESEND_API_KEY not configured" };
   if (!from) return { ok: false, status: 0, messageId: null, error: "FROM_EMAIL not configured" };
   try {
-    const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ from, to: [to], subject, html: html ?? `<p>${body ?? text ?? ""}</p>`, text: text ?? body ?? "", ...(replyTo ? { reply_to: replyTo } : {}) }) });
+    const r = await fetch("https://api.resend.com/emails", { method: "POST", headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" }, body: JSON.stringify({ from, to: [to], subject, html: html ?? `<p>${body ?? text ?? ""}</p>`, text: text ?? body ?? "", ...(replyTo ? { reply_to: replyTo } : {}), ...(attachments?.length ? { attachments } : {}) }) });
     const raw = await r.text();
     if (!r.ok) return { ok: false, status: r.status, messageId: null, error: raw };
     let parsed: { id?: string } = {};

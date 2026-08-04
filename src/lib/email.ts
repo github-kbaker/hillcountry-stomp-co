@@ -1,5 +1,6 @@
 import { mkdir, appendFile } from "node:fs/promises";
 import { join } from "node:path";
+import { SITE_URL } from "./site";
 
 export type EmailResult = { ok: boolean; status: number; messageId: string | null; error: string | null };
 export type LeadEmail = { id: string; name?: string; company?: string; contact_name?: string; email?: string; phone?: string; city?: string; notes?: string; address?: string; kind?: string };
@@ -48,7 +49,8 @@ export async function sendEstimateEmails(lead: LeadEmail): Promise<{ business: E
   const subject = `New estimate request — ${customerName}`;
   let business: EmailResult | null = null; let br = 0;
   if (c.forward) {
-    const r = await attempt(lead, c.forward, subject, `<p>New estimate request</p><p>Reference: ${lead.id}<br>Name: ${lead.name ?? ""}<br>Email: ${lead.email ?? ""}<br>Phone: ${lead.phone ?? ""}<br>Town: ${lead.city ?? ""}<br>Service notes: ${lead.notes ?? ""}</p><p>Admin lead page: /admin/lead/${lead.id}</p>`, `New estimate request\nReference: ${lead.id}\nName: ${lead.name ?? ""}\nEmail: ${lead.email ?? ""}\nPhone: ${lead.phone ?? ""}\nTown: ${lead.city ?? ""}\nService notes: ${lead.notes ?? ""}\nAdmin lead page: /admin/lead/${lead.id}`, lead.email || c.replyTo);
+    const adminLink = `${SITE_URL}/admin/lead/${lead.id}`;
+    const r = await attempt(lead, c.forward, subject, `<p>New estimate request</p><p>Reference: ${lead.id}<br>Name: ${lead.name ?? ""}<br>Email: ${lead.email ?? ""}<br>Phone: ${lead.phone ?? ""}<br>Town: ${lead.city ?? ""}<br>Service notes: ${lead.notes ?? ""}</p><p><a href="${adminLink}">Open lead in admin</a></p>`, `New estimate request\nReference: ${lead.id}\nName: ${lead.name ?? ""}\nEmail: ${lead.email ?? ""}\nPhone: ${lead.phone ?? ""}\nTown: ${lead.city ?? ""}\nService notes: ${lead.notes ?? ""}\nAdmin lead page: ${adminLink}`, lead.email || c.replyTo);
     business = r.result; br = r.retryCount;
   } else await logEmail({ leadId: lead.id, customerName, recipient: "", subject, httpStatus: 0, messageId: null, error: "FORWARD_EMAIL not configured", retryCount: 0, event: "not-configured" });
   const cs = "We received your estimate request — Hill Country Stump Co.";

@@ -232,7 +232,7 @@ function AdminDashboard() {
                         <Utm utm={lead.utm} />
                       </td>
                       <td className="px-4 py-3">
-                        <StatusBadge status={lead.status} /> <EmailBadge status={lead.email?.status} />
+                        <StatusBadge status={lead.status} /> <EmailBadge status={lead.email_status?.status} />
                       </td>
                       <td className="px-4 py-3 text-charcoal-500">
                         {formatDate(lead.created_at)}
@@ -283,7 +283,7 @@ function LeadCard({ lead }: { lead: LeadRow }) {
         >
           {lead.name || "(no name)"}
         </Link>
-        <StatusBadge status={lead.status} /> <EmailBadge status={lead.email?.status} />
+        <StatusBadge status={lead.status} /> <EmailBadge status={lead.email_status?.status} />
       </div>
       <div className="mt-2 space-y-1 text-sm text-charcoal-700">
         <div>

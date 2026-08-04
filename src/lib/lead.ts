@@ -198,7 +198,7 @@ export const submitLead = createServerFn({ method: "POST" }).handler(
         const target = join(LEADS_DIR, `${id}.json`); const temp = `${target}.tmp`;
         await writeFile(temp, JSON.stringify({ ...payload, email }, null, 2)); await rename(temp, target);
       }
-    } catch (err) { console.error(`[lead] email flow failed for ${id}:`, err); email = { status: "failed", recipient: process.env.FORWARD_EMAIL || "", subject: `New estimate request — ${payload.name ?? payload.company ?? "New lead"}`, messageId: null, error: err instanceof Error ? err.message : String(err), retryCount: 0, sentAt: null, lastAttemptAt: new Date().toISOString() }; }
+    } catch (err) { console.error(`[lead] email flow failed for ${id}:`, err); email = { status: "failed", recipient: process.env.FORWARD_EMAIL || "", subject: `New estimate request — ${payload.name ?? payload.company ?? payload.contact_name ?? "New lead"}`, messageId: null, error: err instanceof Error ? err.message : String(err), retryCount: 0, sentAt: null, lastAttemptAt: new Date().toISOString() }; }
     return { ok: true, id, stored };
   },
 );

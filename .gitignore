@@ -22,6 +22,7 @@ src/routeTree.gen.ts
 
 # Local lead/photo data captured by the estimate & contact forms.
 /data/
+/data/logs/
 
 # AI-generated source imagery (compiled WebP lives in public/images).
 /design-assets/

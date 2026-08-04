@@ -60,3 +60,11 @@ export type LeadListResult = {
   counts: Record<LeadStatus, number>;
   total: number;
 };
+
+export type LeadDetail = Record<string, unknown> & {
+  id: string;
+  kind: string;
+  status: LeadStatus;
+  created_at: string;
+  photos: string[];
+};

@@ -420,7 +420,7 @@ export const listLeads = createServerFn({ method: "POST" }).handler(
 export const sendEstimate = createServerFn({ method: "POST" }).handler(async ({ data }: { data: { id: string } }) => {
   if (!(await isAuthenticated())) return unauthorizedResponse();
   const id = String(data.id ?? ""); const lead = await readLeadPayload(id); if (!lead) return jsonResponse({ error: "not_found" }, 404);
-  const recipient = String(lead.email ?? ""); if (!recipient) throw new Error("This lead has no customer email.");
+  const recipient = typeof lead.email === "string" ? lead.email : String((lead.email as Record<string, unknown> | null)?.recipient ?? ""); if (!recipient) throw new Error("This lead has no customer email.");
   if (!String(lead.estimate ?? "").trim()) throw new Error("Enter an estimate amount before sending.");
   const token = randomBytes(24).toString("hex");
   const seeded = { ...lead, email_history: Array.isArray(lead.email_history) ? lead.email_history : [], approval_token: token, approved_at: lead.approved_at ?? null, paymentLink: lead.paymentLink ?? null };

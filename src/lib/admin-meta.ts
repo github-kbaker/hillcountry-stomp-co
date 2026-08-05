@@ -49,6 +49,7 @@ export type LeadRow = {
   name: string;
   phone: string;
   email: string;
+  customer_email?: string;
   city: string;
   lead_source: string;
   utm: { source: string; medium: string; campaign: string };

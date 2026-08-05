@@ -117,6 +117,7 @@ export const submitLead = createServerFn({ method: "POST" }).handler(
             contact_name: get("contact_person"),
             phone: get("phone"),
             email: get("email"),
+            customer_email: get("email"),
             monthly_volume: get("monthly_volume"),
             coverage_area: get("coverage_area"),
             insurance: get("insurance"),
@@ -128,6 +129,7 @@ export const submitLead = createServerFn({ method: "POST" }).handler(
             name: get("name"),
             phone: get("phone"),
             email: get("email"),
+            customer_email: get("email"),
             address: get("address"),
             city: get("city"),
             zip: get("zip"),
@@ -191,14 +193,20 @@ export const submitLead = createServerFn({ method: "POST" }).handler(
     try {
       const sent = await sendEstimateEmails(payload);
       email = sent.state;
+      const now = new Date().toISOString();
+      const history = [
+        { id: crypto.randomUUID(), type: "lead-notification", subject: `New estimate request — ${payload.name ?? payload.company ?? payload.contact_name ?? "New lead"}`, recipient: process.env.FORWARD_EMAIL || "", status: !process.env.RESEND_API_KEY ? "not-configured" : sent.business?.ok ? "sent" : "failed", messageId: sent.business?.messageId ?? null, error: sent.business?.error ?? (!process.env.FORWARD_EMAIL ? "FORWARD_EMAIL not configured" : null), retryCount: sent.businessRetryCount, sentAt: now },
+        { id: crypto.randomUUID(), type: "customer-confirmation", subject: "We received your estimate request — Hill Country Stump Co.", recipient: payload.customer_email ?? "", status: !process.env.RESEND_API_KEY ? "not-configured" : sent.customer?.ok ? "sent" : "failed", messageId: sent.customer?.messageId ?? null, error: sent.customer?.error ?? null, retryCount: sent.customerRetryCount, sentAt: now },
+      ];
+      const saved = { ...payload, email, email_history: history };
       if (stored === "database" && process.env.DATABASE_URL) {
-        try { const db = sql(); await db`update leads set payload = ${JSON.stringify({ ...payload, email })} where id = ${id}`; }
+        try { const db = sql(); await db`update leads set payload = ${JSON.stringify(saved)} where id = ${id}`; }
         catch (err) { console.error(`[lead] email state database update failed for ${id}:`, err); }
       } else {
         const target = join(LEADS_DIR, `${id}.json`); const temp = `${target}.tmp`;
-        await writeFile(temp, JSON.stringify({ ...payload, email }, null, 2)); await rename(temp, target);
+        await writeFile(temp, JSON.stringify(saved, null, 2)); await rename(temp, target);
       }
-    } catch (err) { console.error(`[lead] email flow failed for ${id}:`, err); email = { status: "failed", recipient: process.env.FORWARD_EMAIL || "", subject: `New estimate request — ${payload.name ?? payload.company ?? payload.contact_name ?? "New lead"}`, messageId: null, error: err instanceof Error ? err.message : String(err), retryCount: 0, sentAt: null, lastAttemptAt: new Date().toISOString() }; }
+    } catch (err) { console.error(`[lead] email flow failed for ${id}:`, err); email = { status: "failed", recipient: payload.customer_email || "", subject: `New estimate request — ${payload.name ?? payload.company ?? payload.contact_name ?? "New lead"}`, messageId: null, error: err instanceof Error ? err.message : String(err), retryCount: 0, sentAt: null, lastAttemptAt: new Date().toISOString() }; }
     return { ok: true, id, stored };
   },
 );

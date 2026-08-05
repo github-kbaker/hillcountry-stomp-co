@@ -298,6 +298,19 @@ async function estimatePdf(lead: Record<string, unknown>) {
   if (lead.notes) doc.font("Helvetica-Bold").text("Notes",48,310).font("Helvetica").text(String(lead.notes),48,330,{width:516});
   doc.fontSize(9).fillColor("#666").text("Hill Country Stump Co. · hello@hillcountrystumpco.com",48,730); doc.end(); return done;
 }
+
+export function leadCustomerEmail(lead: Record<string, unknown>): string {
+  const valid = (v: unknown) => typeof v === "string" && v.includes("@") ? v : "";
+  const direct = valid(lead.customer_email); if (direct) return direct;
+  const legacy = valid(lead.email); if (legacy) return legacy;
+  const history = Array.isArray(lead.email_history) ? lead.email_history as Record<string, unknown>[] : [];
+  for (const type of ["customer-confirmation", "estimate-sent"]) {
+    const found = history.slice().reverse().find(e => e.type === type && valid(e.recipient));
+    if (found) return String(found.recipient);
+  }
+  return "";
+}
+
 async function sendWithRetry(leadId: string, recipient: string, subject: string, html: string, text: string, attachments?: Array<{filename:string;content:string}>, replyTo?: string) {
   let retryCount=0; let result=await sendEmail({to:recipient,subject,html,text,attachments,replyTo}); await logEmail({leadId,recipient,subject,httpStatus:result.status,messageId:result.messageId,error:result.error,retryCount,event:result.error === "RESEND_API_KEY not configured" ? "not-configured" : "attempt"});
   if (!result.ok && result.error !== "RESEND_API_KEY not configured") { retryCount=1; result=await sendEmail({to:recipient,subject,html,text,attachments,replyTo}); await logEmail({leadId,recipient,subject,httpStatus:result.status,messageId:result.messageId,error:result.error,retryCount,event:result.ok?"success":"failed"}); } else if(result.ok) await logEmail({leadId,recipient,subject,httpStatus:result.status,messageId:result.messageId,error:null,retryCount,event:"success"});
@@ -420,7 +433,7 @@ export const listLeads = createServerFn({ method: "POST" }).handler(
 export const sendEstimate = createServerFn({ method: "POST" }).handler(async ({ data }: { data: { id: string } }) => {
   if (!(await isAuthenticated())) return unauthorizedResponse();
   const id = String(data.id ?? ""); const lead = await readLeadPayload(id); if (!lead) return jsonResponse({ error: "not_found" }, 404);
-  const emailState = lead.email as Record<string, unknown> | null; const history = Array.isArray(lead.email_history) ? lead.email_history as Record<string, unknown>[] : []; const priorRecipient = history.slice().reverse().find((e) => e.type === "estimate-sent" && typeof e.recipient === "string" && e.recipient.includes("@"))?.recipient; const recipient = typeof lead.email === "string" && lead.email.includes("@") ? lead.email : String(emailState?.recipient && String(emailState.recipient).includes("@") ? emailState.recipient : emailState?.email && String(emailState.email).includes("@") ? emailState.email : priorRecipient ?? ""); if (!recipient) throw new Error("This lead has no customer email.");
+  const recipient = leadCustomerEmail(lead); if (!recipient) throw new Error("This lead has no customer email.");
   if (!String(lead.estimate ?? "").trim()) throw new Error("Enter an estimate amount before sending.");
   const token = randomBytes(24).toString("hex");
   const seeded = { ...lead, email_history: Array.isArray(lead.email_history) ? lead.email_history : [], approval_token: token, approved_at: lead.approved_at ?? null, paymentLink: lead.paymentLink ?? null };
@@ -444,7 +457,7 @@ export const approveEstimate = createServerFn({ method: "POST" }).handler(async 
   const id = String(data.id ?? ""); const lead = await readLeadPayload(id); if (!lead || !data.token || data.token !== lead.approval_token) return { ok: false, error: "invalid_link" };
   const approvedAt = new Date().toISOString(); const next = { ...lead, status: ["new", "pending-estimate", "estimate-sent"].includes(String(lead.status)) ? "approved" : lead.status, approved_at: approvedAt, approval_token: null, email_history: Array.isArray(lead.email_history) ? lead.email_history : [] };
   const recipient = process.env.FORWARD_EMAIL || ""; const subject = `Estimate approved — ${String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer")}`; const adminLink = `${SITE_URL}/admin/lead/${id}`; let entry: EmailHistoryEntry | null = null;
-  if (recipient) { const sent = await sendWithRetry(id, recipient, subject, `<p>Estimate approved.</p><p><a href="${adminLink}">Open lead in admin</a></p>`, `Estimate approved. Admin lead page: ${adminLink}`, undefined, typeof lead.email === "string" ? lead.email : String((lead.email as Record<string, unknown> | null)?.recipient ?? "")); const now = new Date().toISOString(); entry = { id: randomBytes(16).toString("hex"), type: "estimate-approved-notice", subject, recipient, status: sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now }; } else { await logEmail({leadId:id,recipient:"",subject,error:"FORWARD_EMAIL not configured",retryCount:0,event:"not-configured"}); }
+  if (recipient) { const sent = await sendWithRetry(id, recipient, subject, `<p>Estimate approved.</p><p><a href="${adminLink}">Open lead in admin</a></p>`, `Estimate approved. Admin lead page: ${adminLink}`, undefined, leadCustomerEmail(lead)); const now = new Date().toISOString(); entry = { id: randomBytes(16).toString("hex"), type: "estimate-approved-notice", subject, recipient, status: sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now }; } else { await logEmail({leadId:id,recipient:"",subject,error:"FORWARD_EMAIL not configured",retryCount:0,event:"not-configured"}); }
   if (entry) next.email_history = [...next.email_history, entry]; await writeLeadPayload(id, next); return { ok: true };
 });
 
@@ -462,7 +475,7 @@ export const updateLead = createServerFn({ method: "POST" }).handler(
     const id = String(data.id ?? "");
     const patch = data.patch ?? {};
     if (patch.status && !(LEAD_STATUSES as readonly string[]).includes(String(patch.status))) return jsonResponse({ error: "invalid_status" }, 400);
-    const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status", "email", "paymentLink"];
+    const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status", "email", "customer_email", "paymentLink"];
     let result: Record<string, unknown> | null = null;
     let failure: Response | null = null;
     const previous = leadWriteQueues.get(id) ?? Promise.resolve();

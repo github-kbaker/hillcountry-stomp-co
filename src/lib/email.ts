@@ -4,7 +4,7 @@ import { SITE_URL } from "./site";
 
 export type EmailResult = { ok: boolean; status: number; messageId: string | null; error: string | null };
 export type EmailHistoryEntry = { id: string; type: "estimate-sent" | "lead-notification" | "customer-confirmation" | "estimate-approved-notice" | "test" | "other"; subject: string; recipient: string; status: "sent" | "failed" | "not-configured"; messageId?: string | null; error?: string | null; retryCount: number; sentAt: string; attachment?: "pdf" | null };
-export type LeadEmail = { id: string; name?: string; company?: string; contact_name?: string; email?: string; phone?: string; city?: string; notes?: string; address?: string; kind?: string };
+export type LeadEmail = { id: string; name?: string; company?: string; contact_name?: string; email?: string; customer_email?: string; phone?: string; city?: string; notes?: string; address?: string; kind?: string };
 export type EmailState = { status: "sent" | "failed" | "not-configured" | "pending"; recipient: string; subject: string; messageId: string | null; error: string | null; retryCount: number; sentAt: string | null; lastAttemptAt: string | null };
 
 const cfg = () => ({
@@ -60,6 +60,6 @@ export async function sendEstimateEmails(lead: LeadEmail): Promise<{ business: E
     const r = await attempt(lead, lead.email, cs, `<p>Thank you for contacting Hill Country Stump Co.</p><p>Reference: ${lead.id}</p><p>We received your estimate request and we'll get back to you.</p>`, `Thank you for contacting Hill Country Stump Co.\nReference: ${lead.id}\nWe received your estimate request and we'll get back to you.`, c.replyTo);
     customer = r.result; cr = r.retryCount;
   }
-  const final = business ?? customer; const status = !c.key ? "not-configured" : final?.ok ? "sent" : "failed";
-  return { business, customer, businessRetryCount: br, customerRetryCount: cr, state: { status, recipient: business ? c.forward : (lead.email ?? c.forward), subject, messageId: business?.messageId ?? customer?.messageId ?? null, error: business?.error ?? customer?.error ?? (!c.key ? "RESEND_API_KEY not configured" : null), retryCount: br + cr, sentAt: business?.ok || customer?.ok ? new Date().toISOString() : null, lastAttemptAt: new Date().toISOString() } };
+  const status = !c.key ? "not-configured" : customer?.ok ? "sent" : "failed";
+  return { business, customer, businessRetryCount: br, customerRetryCount: cr, state: { status, recipient: lead.email ?? "", subject: cs, messageId: customer?.messageId ?? null, error: customer?.error ?? (!c.key ? "RESEND_API_KEY not configured" : null), retryCount: cr, sentAt: customer?.ok ? new Date().toISOString() : null, lastAttemptAt: new Date().toISOString() } };
 }

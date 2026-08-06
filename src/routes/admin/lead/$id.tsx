@@ -391,6 +391,12 @@ function LeadDetailPage() {
   const customerEmail =
     String(emailState?.recipient ?? "").trim() ||
     String(lead.customer_email ?? "").trim();
+  // Display value for the Contact card EMAIL row: unwrap an EmailState
+  // object (recipient) or fall back to the raw string; never String() the object.
+  const emailDisplay =
+    (typeof emailState === "object" && emailState !== null
+      ? String(emailState.recipient ?? "")
+      : String(lead.email ?? "")).trim() || "—";
   const hasCustEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail);
 
   return (
@@ -1261,7 +1267,11 @@ function LeadDetailPage() {
                 <dt className="text-xs font-semibold uppercase tracking-wide text-charcoal-500">
                   {label(k)}
                 </dt>
-                {k === "customer_email" ? (
+                {k === "email" ? (
+                  <dd className="mt-1 whitespace-pre-wrap text-charcoal-800">
+                    {emailDisplay}
+                  </dd>
+                ) : k === "customer_email" ? (
                   <input
                     className="input mt-1"
                     defaultValue={String(lead[k] ?? "")}

@@ -93,6 +93,7 @@ export type StatusHistoryEntry = {
   from: LeadStatus;
   to: LeadStatus;
   source: string;
+  note?: string; // optional human-readable detail (e.g. "Contractor assigned: X")
 };
 
 /**
@@ -217,7 +218,82 @@ export const DEFAULT_LEAD_STATUS: LeadStatus = "new";
 
 /** One row in the dashboard list — a lean, display-ready summary of a lead. */
 export type JobSchedule = { service_date: string | null; arrival_time: string | null; estimated_duration_hours: string | null };
-export type Subcontractor = { name: string; phone: string; email: string; payout_status: "unpaid" | "paid" | null; payout_paid_at: string | null };
+/**
+ * Subcontractor record (stage D4). All fields optional-safe: legacy leads that
+ * predate a field simply read as the default via normalizeSubcontractor().
+ * Equipment checklist is a string[] of checked item keys; the custom "other"
+ * item is stored as "custom:<label>" (or "custom" with no label), with the
+ * free-text label kept separately in equipment_checklist_custom so it survives
+ * toggling.
+ */
+export type Subcontractor = {
+  name: string;
+  contact_person: string;
+  phone: string;
+  email: string;
+  service_area: string;
+  insurance_verified: boolean;
+  insurance_expiration: string | null; // yyyy-mm-dd (optional)
+  crew_size: string;
+  payout_status: "unpaid" | "paid" | null;
+  payout_paid_at: string | null;
+  payout_method: string; // Check | Venmo | Zelle | Cash | ACH | ""
+  notes: string;
+  equipment_checklist: string[];
+  equipment_checklist_custom: string;
+  assigned_at: string | null; // first "Assign Contractor" timestamp
+};
+
+/** Standard equipment-checklist items (keys) for the subcontractor card. */
+export const EQUIPMENT_CHECKLIST_ITEMS = [
+  "grinder",
+  "trailer",
+  "chainsaw",
+  "mini skid steer",
+  "rake",
+  "safety gear",
+] as const;
+/** Display labels for the standard checklist items. */
+export const EQUIPMENT_CHECKLIST_LABELS: Record<string, string> = {
+  grinder: "Stump grinder",
+  trailer: "Trailer",
+  chainsaw: "Chainsaw",
+  "mini skid steer": "Mini skid steer",
+  rake: "Rake / cleanup tools",
+  "safety gear": "Safety gear (PPE)",
+};
+/** Prefix used inside equipment_checklist for the checked custom item. */
+export const EQUIPMENT_CHECKLIST_CUSTOM_PREFIX = "custom";
+
+/**
+ * Normalize any stored subcontractor value (including legacy shapes and null)
+ * into the full D4 Subcontractor shape. Returns null when the record has no
+ * subcontractor at all. Used server-side on every save (recomputeJobFinancials)
+ * and by the dry-run migration report.
+ */
+export function normalizeSubcontractor(sub: unknown): Subcontractor | null {
+  if (!sub || typeof sub !== "object") return null;
+  const s = sub as Record<string, unknown>;
+  return {
+    name: String(s.name ?? ""),
+    contact_person: String(s.contact_person ?? ""),
+    phone: String(s.phone ?? ""),
+    email: String(s.email ?? ""),
+    service_area: String(s.service_area ?? ""),
+    insurance_verified: s.insurance_verified === true || s.insurance_verified === "true",
+    insurance_expiration: s.insurance_expiration ? String(s.insurance_expiration) : null,
+    crew_size: String(s.crew_size ?? ""),
+    payout_status: s.payout_status === "paid" ? "paid" : "unpaid",
+    payout_paid_at: s.payout_paid_at ? String(s.payout_paid_at) : null,
+    payout_method: String(s.payout_method ?? ""),
+    notes: String(s.notes ?? ""),
+    equipment_checklist: Array.isArray(s.equipment_checklist)
+      ? s.equipment_checklist.map(String)
+      : [],
+    equipment_checklist_custom: String(s.equipment_checklist_custom ?? ""),
+    assigned_at: s.assigned_at ? String(s.assigned_at) : null,
+  };
+}
 export type EquipmentItem = { id: string; name: string; cost: string };
 export type ServiceCharge = { id: string; description: string; amount: string };
 
@@ -278,3 +354,85 @@ export type LeadDetail = Record<string, unknown> & {
     type?: string;
   }>;
 };
+
+/* ------------------------------------------------------------------ */
+/* Stage D4 — cents-safe profit summary (CLIENT-SAFE)                 */
+/* ------------------------------------------------------------------ */
+
+/** Parse any money-ish input ("350", "75.00", "$1,234.56") into integer cents. */
+export function parseCents(v: unknown): number {
+  const n = Number(String(v ?? "").replace(/[$,]/g, ""));
+  return Number.isFinite(n) ? Math.round(n * 100) : 0;
+}
+
+/** Format integer cents as "$-less" money "1234.56" (matches existing money()). */
+export function moneyFromCents(c: number): string {
+  return ((Number.isFinite(c) ? c : 0) / 100).toFixed(2);
+}
+
+/**
+ * The internal-only profit summary. Everything is integer cents — no float
+ * money math anywhere. Management fee is included EXACTLY ONCE (inside
+ * totalInternalCost); gross profit = customer total − total internal cost,
+ * so the fee is never double-subtracted. Margin % = gross profit / customer
+ * total when the denominator is > 0, else null (renders as "—").
+ */
+export type ProfitSummary = {
+  estimate: number; // cents
+  serviceCharges: number; // cents
+  customerTotal: number; // cents (estimate + additional service charges)
+  contractorCost: number; // cents
+  equipmentCost: number; // cents
+  fuel: number; // cents
+  disposal: number; // cents
+  managementFee: number; // cents
+  paymentProcessingCost: number; // cents
+  otherInternalCost: number; // cents
+  totalInternalCost: number; // cents — the ONE sum of all internal costs
+  grossProfit: number; // cents
+  marginPercent: number | null; // 0–100, null when customerTotal <= 0
+};
+
+export function computeProfitSummary(lead: Record<string, unknown>): ProfitSummary {
+  const charges = Array.isArray(lead.service_charges)
+    ? (lead.service_charges as Array<Record<string, unknown>>)
+    : [];
+  const equipment = Array.isArray(lead.equipment)
+    ? (lead.equipment as Array<Record<string, unknown>>)
+    : [];
+  const estimate = parseCents(lead.estimate);
+  const serviceCharges = charges.reduce((s, x) => s + parseCents(x.amount), 0);
+  const customerTotal = estimate + serviceCharges;
+  const contractorCost = parseCents(lead.contractor_cost);
+  const equipmentCost = equipment.reduce((s, x) => s + parseCents(x.cost), 0);
+  const fuel = parseCents(lead.fuel);
+  const disposal = parseCents(lead.disposal);
+  const managementFee = parseCents(lead.management_fee);
+  const paymentProcessingCost = parseCents(lead.payment_processing_cost);
+  const otherInternalCost = parseCents(lead.other_internal_cost);
+  const totalInternalCost =
+    contractorCost +
+    equipmentCost +
+    fuel +
+    disposal +
+    managementFee +
+    paymentProcessingCost +
+    otherInternalCost;
+  const grossProfit = customerTotal - totalInternalCost;
+  const marginPercent = customerTotal > 0 ? (grossProfit / customerTotal) * 100 : null;
+  return {
+    estimate,
+    serviceCharges,
+    customerTotal,
+    contractorCost,
+    equipmentCost,
+    fuel,
+    disposal,
+    managementFee,
+    paymentProcessingCost,
+    otherInternalCost,
+    totalInternalCost,
+    grossProfit,
+    marginPercent,
+  };
+}

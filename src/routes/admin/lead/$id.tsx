@@ -1,19 +1,26 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import {
+  assignContractor,
   deleteLead,
   getLead,
   getLeadPhoto,
   getSession,
-  updateLead,
   sendEstimate,
+  sendWorkOrder,
+  updateLead,
   markLeadStatus,
 } from "~/lib/admin";
 import {
+  EQUIPMENT_CHECKLIST_CUSTOM_PREFIX,
+  EQUIPMENT_CHECKLIST_ITEMS,
+  EQUIPMENT_CHECKLIST_LABELS,
   LEAD_STATUSES,
   LEAD_STATUS_STAGES,
   STATUS_LABELS,
+  computeProfitSummary,
   nextRecommendedAction,
+  normalizeSubcontractor,
   stageReachedAt,
   statusStageIndex,
 } from "~/lib/admin-meta";
@@ -58,6 +65,25 @@ const label = (s: string) =>
   s.replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 const n = (v: unknown) => Number(String(v ?? "").replace(/[$,]/g, "")) || 0;
 const fmt = (v: unknown) => `$${n(v).toFixed(2)}`;
+const m = (c: number) => `$${(c / 100).toFixed(2)}`; // integer cents → money
+/** Defaults for a fresh subcontractor record (stage D4). */
+const EMPTY_SUB: Subcontractor = {
+  name: "",
+  contact_person: "",
+  phone: "",
+  email: "",
+  service_area: "",
+  insurance_verified: false,
+  insurance_expiration: null,
+  crew_size: "",
+  payout_status: "unpaid",
+  payout_paid_at: null,
+  payout_method: "",
+  notes: "",
+  equipment_checklist: [],
+  equipment_checklist_custom: "",
+  assigned_at: null,
+};
 
 function LeadDetailPage() {
   const { id } = Route.useParams();
@@ -72,6 +98,9 @@ function LeadDetailPage() {
   const [generating, setGenerating] = useState(false);
   const [calErr, setCalErr] = useState("");
   const [calMsg, setCalMsg] = useState("");
+  // Stage D4 — assign / work-order action state.
+  const [busy, setBusy] = useState<string | null>(null);
+  const [woMsg, setWoMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -180,6 +209,42 @@ function LeadDetailPage() {
       setMarking(null);
     }
   }
+  /** Stage D4 — record the contractor assignment (no status change, no email). */
+  async function doAssign() {
+    if (busy) return;
+    setBusy("assign");
+    setError("");
+    try {
+      const r = await assignContractor({ data: { id } });
+      if (r instanceof Response || !r.ok) throw Error((r as any).error || "Assign failed");
+      setLead(r.lead as LeadDetail);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't assign contractor");
+    } finally {
+      setBusy(null);
+    }
+  }
+  /** Stage D4 — send the work-order email to the assigned contractor. */
+  async function doWorkOrder() {
+    if (busy) return;
+    setBusy("work-order");
+    setError("");
+    setWoMsg(null);
+    try {
+      const r = await sendWorkOrder({ data: { id } });
+      if (r instanceof Response || !r.ok) throw Error((r as any).error || "Send failed");
+      setLead(r.lead as LeadDetail);
+      setWoMsg(
+        r.ok
+          ? { ok: true, text: `Work order sent${r.messageId ? ` (${r.messageId})` : ""}.` }
+          : { ok: false, text: `Work order not sent: ${r.error ?? "unknown error"}` },
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't send work order");
+    } finally {
+      setBusy(null);
+    }
+  }
   /**
    * Stage D3 — Save to Calendar. Pure client-side helper: builds the event
    * from the on-screen schedule, validates first, then either opens Google /
@@ -253,15 +318,42 @@ function LeadDetailPage() {
     );
 
   const schedule = (lead.schedule ?? null) as JobSchedule | null;
-  const sub = (lead.subcontractor ?? null) as Subcontractor | null;
+  const sub = normalizeSubcontractor(lead.subcontractor) ?? EMPTY_SUB;
   const equipment = (lead.equipment ?? []) as EquipmentItem[];
   const charges = (lead.service_charges ?? []) as ServiceCharge[];
   const chargesTotal = charges.reduce((a, x) => a + n(x.amount), 0);
   const equipTotal = equipment.reduce((a, x) => a + n(x.cost), 0);
-  const customerTotal = n(lead.estimate) + chargesTotal;
-  const costsTotal = n(lead.contractor_cost) + equipTotal;
-  const profit = customerTotal - costsTotal - n(lead.management_fee);
+  // Stage D4 — internal-only profit summary (cents-safe, admin-only).
+  const summary = computeProfitSummary(lead);
   const patchArray = (key: string, arr: unknown[]) => save({ [key]: arr });
+  // Subcontractor edits: keep new fields in state + the unified Save button.
+  const patchSub = (patch: Partial<Subcontractor>) => {
+    const base = normalizeSubcontractor(lead.subcontractor) ?? EMPTY_SUB;
+    setLead({ ...lead, subcontractor: { ...base, ...patch } });
+    setDirty(true);
+  };
+  const who = (sub.name || sub.contact_person || "").trim();
+  const assignedAt = sub.assigned_at;
+  const checklist = sub.equipment_checklist ?? [];
+  const customChecked = checklist.some(
+    (k) => k === EQUIPMENT_CHECKLIST_CUSTOM_PREFIX || k.startsWith("custom:"),
+  );
+  const toggleChecklist = (key: string) => {
+    const list = [...checklist];
+    if (key === EQUIPMENT_CHECKLIST_CUSTOM_PREFIX) {
+      const rest = list.filter((k) => !k.startsWith("custom"));
+      if (!customChecked) {
+        const label = (sub.equipment_checklist_custom ?? "").trim();
+        rest.push(label ? `custom:${label}` : "custom");
+      }
+      patchSub({ equipment_checklist: rest });
+    } else {
+      const next = list.includes(key)
+        ? list.filter((k) => k !== key)
+        : [...list, key];
+      patchSub({ equipment_checklist: next });
+    }
+  };
 
   const history = (lead.status_history ?? []) as StatusHistoryEntry[];
   const stageIdx = statusStageIndex(lead.status);
@@ -713,55 +805,131 @@ function LeadDetailPage() {
       </section>
 
       <section className="card mt-5">
-        <h2 className="font-display text-xl font-bold text-forest-900">
-          Subcontractor & payout
-        </h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h2 className="font-display text-xl font-bold text-forest-900">
+            Subcontractor & payout
+          </h2>
+          <div className="flex flex-wrap items-center gap-2">
+            {assignedAt ? (
+              <span className="rounded-full bg-forest-700 px-3 py-1 text-xs font-bold text-limestone-50">
+                Assigned ✓
+              </span>
+            ) : (
+              <span className="rounded-full bg-limestone-200 px-3 py-1 text-xs font-semibold text-charcoal-500">
+                Not assigned
+              </span>
+            )}
+            <button
+              onClick={doAssign}
+              disabled={busy !== null || !who}
+              title={who ? "" : "Enter a contractor name or contact person first"}
+              className="btn-secondary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy === "assign" ? "Assigning…" : assignedAt ? "Re-assign" : "Assign Contractor"}
+            </button>
+            <button
+              onClick={doWorkOrder}
+              disabled={busy !== null || !who}
+              title={who ? "" : "Enter a contractor name or contact person first"}
+              className="btn-primary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {busy === "work-order" ? "Sending…" : "Send Work Order"}
+            </button>
+          </div>
+        </div>
+        {woMsg && (
+          <p className={`mt-3 rounded-lg border px-3 py-2 text-sm ${woMsg.ok ? "border-forest-200 bg-forest-50 text-forest-900" : "border-red-200 bg-red-50 text-red-800"}`}>
+            {woMsg.text}
+          </p>
+        )}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className="label">
             Name
             <input
               className="input mt-1"
-              value={sub?.name ?? ""}
-              onChange={(e) =>
-                setLead({
-                  ...lead,
-                  subcontractor: {
-                    ...(sub ?? { phone: "", email: "", payout_status: "unpaid", payout_paid_at: null }),
-                    name: e.target.value,
-                  },
-                })
-              }
-              onBlur={(e) => save({ subcontractor: { ...(sub ?? {}), name: e.target.value } })}
+              value={sub.name}
+              onChange={(e) => patchSub({ name: e.target.value })}
+              onBlur={(e) => save({ subcontractor: { ...sub, name: e.target.value } })}
+            />
+          </label>
+          <label className="label">
+            Contact person
+            <input
+              className="input mt-1"
+              value={sub.contact_person}
+              onChange={(e) => patchSub({ contact_person: e.target.value })}
+              placeholder="Owner / operator name"
+            />
+          </label>
+          <label className="label">
+            Service area
+            <input
+              className="input mt-1"
+              value={sub.service_area}
+              onChange={(e) => patchSub({ service_area: e.target.value })}
+              placeholder="e.g. Kerrville / Fredericksburg"
+            />
+          </label>
+          <label className="label">
+            Crew size
+            <input
+              className="input mt-1"
+              inputMode="numeric"
+              value={sub.crew_size}
+              onChange={(e) => patchSub({ crew_size: e.target.value })}
+              placeholder="e.g. 2"
             />
           </label>
           <label className="label">
             Phone
             <input
               className="input mt-1"
-              value={sub?.phone ?? ""}
-              onChange={(e) =>
-                setLead({
-                  ...lead,
-                  subcontractor: { ...(sub ?? {}), phone: e.target.value },
-                })
-              }
-              onBlur={(e) => save({ subcontractor: { ...(sub ?? {}), phone: e.target.value } })}
+              value={sub.phone}
+              onChange={(e) => patchSub({ phone: e.target.value })}
+              onBlur={(e) => save({ subcontractor: { ...sub, phone: e.target.value } })}
             />
           </label>
           <label className="label">
             Email
             <input
               className="input mt-1"
-              value={sub?.email ?? ""}
-              onChange={(e) =>
-                setLead({
-                  ...lead,
-                  subcontractor: { ...(sub ?? {}), email: e.target.value },
-                })
-              }
-              onBlur={(e) => save({ subcontractor: { ...(sub ?? {}), email: e.target.value } })}
+              type="email"
+              value={sub.email}
+              onChange={(e) => patchSub({ email: e.target.value })}
+              onBlur={(e) => save({ subcontractor: { ...sub, email: e.target.value } })}
             />
           </label>
+        </div>
+        {/* Insurance */}
+        <div className="mt-4 rounded-lg border border-limestone-200 bg-limestone-50 p-4">
+          <h3 className="text-xs font-bold uppercase tracking-wide text-charcoal-500">
+            Insurance
+          </h3>
+          <div className="mt-3 flex flex-wrap items-center gap-6">
+            <label className="flex items-center gap-2 text-sm font-medium text-charcoal-800">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={sub.insurance_verified}
+                onChange={(e) => patchSub({ insurance_verified: e.target.checked })}
+              />
+              Insurance verified
+            </label>
+            <label className="label mb-0">
+              Expiration date (optional)
+              <input
+                type="date"
+                className="input mt-1"
+                value={sub.insurance_expiration ?? ""}
+                onChange={(e) =>
+                  patchSub({ insurance_expiration: e.target.value || null })
+                }
+              />
+            </label>
+          </div>
+        </div>
+        {/* Payout */}
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="label">
             Contractor cost
             <input
@@ -776,15 +944,15 @@ function LeadDetailPage() {
             Payout status
             <select
               className="input mt-1"
-              value={sub?.payout_status ?? "unpaid"}
+              value={sub.payout_status ?? "unpaid"}
               onChange={(e) => {
                 const paid = e.target.value === "paid";
                 save({
                   subcontractor: {
-                    ...(sub ?? {}),
+                    ...sub,
                     payout_status: paid ? "paid" : "unpaid",
                     payout_paid_at: paid
-                      ? sub?.payout_paid_at ?? new Date().toISOString()
+                      ? sub.payout_paid_at ?? new Date().toISOString()
                       : null,
                   },
                 });
@@ -794,14 +962,81 @@ function LeadDetailPage() {
               <option value="paid">Paid</option>
             </select>
           </label>
+          <label className="label">
+            Payout method
+            <select
+              className="input mt-1"
+              value={sub.payout_method}
+              onChange={(e) => patchSub({ payout_method: e.target.value })}
+            >
+              <option value="">—</option>
+              <option value="Check">Check</option>
+              <option value="Venmo">Venmo</option>
+              <option value="Zelle">Zelle</option>
+              <option value="Cash">Cash</option>
+              <option value="ACH">ACH</option>
+            </select>
+          </label>
+          <div className="label">
+            Payout paid at
+            <p className="input mt-1 flex items-center bg-limestone-50 text-sm text-charcoal-600">
+              {sub.payout_paid_at
+                ? new Date(sub.payout_paid_at).toLocaleString()
+                : "—"}
+            </p>
+          </div>
         </div>
-        {sub?.payout_paid_at && (
-          <p className="mt-3 text-sm text-charcoal-500">
-            Payout paid at: {new Date(sub.payout_paid_at).toLocaleString()}
-          </p>
-        )}
+        {/* Notes */}
+        <label className="label mt-4 block">
+          Contractor notes
+          <textarea
+            className="input mt-1 min-h-20"
+            value={sub.notes}
+            onChange={(e) => patchSub({ notes: e.target.value })}
+            placeholder="Access notes, gate codes, payment terms, etc."
+          />
+        </label>
+        {/* Equipment checklist (what the contractor brings; costs stay in the
+            Equipment line items card so they keep flowing into the financials) */}
+        <div className="mt-4 border-t border-limestone-200 pt-4">
+          <h3 className="text-xs font-bold uppercase tracking-wide text-charcoal-500">
+            Equipment checklist — contractor brings
+          </h3>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {EQUIPMENT_CHECKLIST_ITEMS.map((k) => (
+              <label
+                key={k}
+                className="flex cursor-pointer items-center gap-2 rounded-lg border border-limestone-200 bg-white px-3 py-2 text-sm"
+              >
+                <input
+                  type="checkbox"
+                  className="h-4 w-4"
+                  checked={checklist.includes(k)}
+                  onChange={() => toggleChecklist(k)}
+                />
+                {EQUIPMENT_CHECKLIST_LABELS[k]}
+              </label>
+            ))}
+            <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-limestone-200 bg-white px-3 py-2 text-sm">
+              <input
+                type="checkbox"
+                className="h-4 w-4"
+                checked={customChecked}
+                onChange={() => toggleChecklist(EQUIPMENT_CHECKLIST_CUSTOM_PREFIX)}
+              />
+              Other:
+              <input
+                className="input ml-1 flex-1"
+                value={sub.equipment_checklist_custom}
+                onChange={(e) =>
+                  patchSub({ equipment_checklist_custom: e.target.value })
+                }
+                placeholder="e.g. Bobcat 330"
+              />
+            </label>
+          </div>
+        </div>
       </section>
-
       <LineItems
         title="Equipment"
         rows={equipment}
@@ -823,7 +1058,7 @@ function LeadDetailPage() {
 
       <section className="card mt-5">
         <h2 className="font-display text-xl font-bold text-forest-900">Internal costs</h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <label className="label">
             Company management fee
             <input
@@ -854,33 +1089,67 @@ function LeadDetailPage() {
               onBlur={(e) => save({ disposal: e.target.value })}
             />
           </label>
+          <label className="label">
+            Payment processing cost
+            <input
+              className="input mt-1"
+              inputMode="decimal"
+              value={String(lead.payment_processing_cost ?? "")}
+              onChange={(e) => setLead({ ...lead, payment_processing_cost: e.target.value })}
+              onBlur={(e) => save({ payment_processing_cost: e.target.value })}
+            />
+          </label>
+          <label className="label">
+            Other internal cost
+            <input
+              className="input mt-1"
+              inputMode="decimal"
+              value={String(lead.other_internal_cost ?? "")}
+              onChange={(e) => setLead({ ...lead, other_internal_cost: e.target.value })}
+              onBlur={(e) => save({ other_internal_cost: e.target.value })}
+            />
+          </label>
         </div>
       </section>
 
       <section className="card mt-5">
         <h2 className="font-display text-xl font-bold text-forest-900">
-          Job financial summary (auto-calculated)
+          Profit summary (internal only)
         </h2>
         <p className="mt-1 text-sm text-charcoal-500">
-          Customer pricing − subcontractor and equipment costs − company management fee.
+          Admin-only — never rendered on customer-facing pages. Total internal
+          cost is one sum (management fee included once); gross profit =
+          customer total − total internal cost. Cents-safe integer math.
         </p>
         <div className="mt-5 grid gap-5 sm:grid-cols-3">
           <div className="rounded-lg bg-forest-50 p-4">
             <strong className="text-forest-900">Customer pricing</strong>
-            <p>Estimate: {fmt(lead.estimate)}</p>
-            <p>Additional charges: {fmt(chargesTotal)}</p>
-            <p className="mt-2 font-bold">Customer total: {fmt(customerTotal)}</p>
+            <p>Estimate: {m(summary.estimate)}</p>
+            <p>Additional charges: {m(summary.serviceCharges)}</p>
+            <p className="mt-2 font-bold">Customer total: {m(summary.customerTotal)}</p>
           </div>
           <div className="rounded-lg bg-earth-100 p-4">
-            <strong className="text-earth-800">Subcontractor costs</strong>
-            <p>Contractor: {fmt(lead.contractor_cost)}</p>
-            <p>Equipment: {fmt(equipTotal)}</p>
-            <p className="mt-2 font-bold">Costs total: {fmt(costsTotal)}</p>
+            <strong className="text-earth-800">Total internal cost</strong>
+            <p>Contractor: {m(summary.contractorCost)}</p>
+            <p>Equipment: {m(summary.equipmentCost)}</p>
+            <p>Fuel: {m(summary.fuel)}</p>
+            <p>Disposal: {m(summary.disposal)}</p>
+            <p>Management fee: {m(summary.managementFee)}</p>
+            <p>Payment processing: {m(summary.paymentProcessingCost)}</p>
+            <p>Other internal: {m(summary.otherInternalCost)}</p>
+            <p className="mt-2 font-bold">Total internal cost: {m(summary.totalInternalCost)}</p>
           </div>
           <div className="rounded-lg bg-limestone-100 p-4">
-            <strong>Company management fee</strong>
-            <p className="mt-2">Fee: {fmt(lead.management_fee)}</p>
-            <p className="mt-2 font-bold text-forest-800">Profit: {fmt(profit)}</p>
+            <strong>Profit</strong>
+            <p className="mt-3 font-bold text-forest-800">
+              Gross profit: {m(summary.grossProfit)}
+            </p>
+            <p className="mt-1 font-bold text-forest-800">
+              Margin:{" "}
+              {summary.marginPercent === null
+                ? "—"
+                : `${summary.marginPercent.toFixed(1)}%`}
+            </p>
           </div>
         </div>
       </section>
@@ -976,9 +1245,10 @@ function ActivityRow({ entry }: { entry: StatusHistoryEntry }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="font-medium text-charcoal-800">
-        {entry.from === entry.to
-          ? `New Lead created — ${STATUS_LABELS[entry.to]}`
-          : `${STATUS_LABELS[entry.from]} → ${STATUS_LABELS[entry.to]}`}
+        {entry.note ??
+          (entry.from === entry.to
+            ? `New Lead created — ${STATUS_LABELS[entry.to]}`
+            : `${STATUS_LABELS[entry.from]} → ${STATUS_LABELS[entry.to]}`)}
       </span>
       <span className="rounded bg-limestone-200 px-1.5 py-0.5 text-[11px] font-semibold text-charcoal-600">
         {entry.source}

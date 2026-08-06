@@ -13,6 +13,9 @@ import {
   applyAdminStatusChange,
   applyStatusTransition,
   canonicalizeStatus,
+  computeProfitSummary,
+  moneyFromCents,
+  normalizeSubcontractor,
   statusStageIndex,
 } from "./admin-meta";
 import type {
@@ -20,7 +23,10 @@ import type {
   LeadListResult,
   LeadRow,
   LeadStatus,
+  StatusHistoryEntry,
 } from "./admin-meta";
+import { buildWorkOrderHtml, buildWorkOrderText } from "./work-order";
+import type { WorkOrderLeadInput } from "./work-order";
 
 /**
  * IMPORTANT (build isolation): client components import the shared constants
@@ -298,7 +304,6 @@ async function readAllLeads(): Promise<LeadRow[]> {
 
 function cents(v: unknown): number { const n = Number(String(v ?? "").replace(/[$,]/g, "")); return Number.isFinite(n) ? Math.round(n * 100) : 0; }
 function money(v: unknown) { return (cents(v) / 100).toFixed(2); }
-function amount(v: unknown) { return cents(v) / 100; }
 function validateFinancials(patch: Record<string, unknown>, existing: Record<string, unknown>) {
   const estimate = cents("estimate" in patch ? patch.estimate : existing.estimate);
   const deposit = cents("deposit" in patch ? patch.deposit : existing.deposit);
@@ -314,13 +319,15 @@ function recomputeJobFinancials(next: Record<string, unknown>) {
   next.equipment = equipment.map((x: any) => ({ id: String(x?.id || randomBytes(8).toString("hex")), name: String(x?.name || ""), cost: String(x?.cost || "") }));
   const schedule = next.schedule as any;
   next.schedule = schedule ? { service_date: schedule.service_date ? String(schedule.service_date) : null, arrival_time: schedule.arrival_time ? String(schedule.arrival_time) : null, estimated_duration_hours: schedule.estimated_duration_hours ? String(schedule.estimated_duration_hours) : null } : null;
-  const sub = next.subcontractor as any;
-  next.subcontractor = sub ? { name: String(sub.name || ""), phone: String(sub.phone || ""), email: String(sub.email || ""), payout_status: sub.payout_status === "paid" ? "paid" : "unpaid", payout_paid_at: sub.payout_paid_at ? String(sub.payout_paid_at) : null } : null;
-  const chargesTotal = charges.reduce((s: number, x: any) => s + amount(x?.amount), 0);
-  const equipmentTotal = equipment.reduce((s: number, x: any) => s + amount(x?.cost), 0);
-  next.customer_total = (amount(next.estimate) + chargesTotal).toFixed(2);
-  next.costs_total = (amount(next.contractor_cost) + equipmentTotal).toFixed(2);
-  next.profit = (amount(next.customer_total) - amount(next.costs_total) - amount(next.management_fee)).toFixed(2);
+  // Stage D4: normalize the subcontractor record to the full shape (defaults
+  // for legacy/missing fields) and derive the financials with one cents-safe
+  // sum — costs_total now means TOTAL INTERNAL COST (contractor + equipment +
+  // fuel + disposal + management fee + payment processing + other internal).
+  next.subcontractor = normalizeSubcontractor(next.subcontractor);
+  const summary = computeProfitSummary(next);
+  next.customer_total = moneyFromCents(summary.customerTotal);
+  next.costs_total = moneyFromCents(summary.totalInternalCost);
+  next.profit = moneyFromCents(summary.grossProfit);
 }
 function esc(v: unknown) { return String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c] as string)); }
 async function estimatePdf(lead: Record<string, unknown>) {
@@ -619,6 +626,101 @@ export const updateLead = createServerFn({ method: "POST" }).handler(
     }
     if (failure) return failure;
     return { ok: true, lead: result };
+  },
+);
+
+/**
+ * Stage D4 — Assign Contractor. Records the assignment WITHOUT changing the
+ * pipeline status: appends a status_history entry (from === to, source
+ * "contractor-assigned", note naming the contractor) and stamps
+ * subcontractor.assigned_at (first assignment wins). Sends no email.
+ */
+export const assignContractor = createServerFn({ method: "POST" }).handler(
+  async ({ data }: { data: { id: string } }): Promise<Response | { ok: boolean; lead: Record<string, unknown> }> => {
+    if (!(await isAuthenticated())) return unauthorizedResponse();
+    const id = String(data.id ?? "");
+    let result: Record<string, unknown> | null = null;
+    let failure: Response | null = null;
+    const previous = leadWriteQueues.get(id) ?? Promise.resolve();
+    const current = previous.then(async () => {
+      const lead = await readLeadPayload(id);
+      if (!lead) { failure = jsonResponse({ error: "not_found" }, 404); return; }
+      const sub = normalizeSubcontractor(lead.subcontractor);
+      const who = String(sub?.name || sub?.contact_person || "").trim();
+      if (!sub || !who) {
+        failure = jsonResponse({ error: "Enter a contractor name or contact person first" }, 400);
+        return;
+      }
+      const now = new Date().toISOString();
+      const next = {
+        ...lead,
+        subcontractor: { ...sub, assigned_at: sub.assigned_at ?? now },
+        status_history: [
+          ...(Array.isArray(lead.status_history) ? (lead.status_history as StatusHistoryEntry[]) : []),
+          {
+            at: now,
+            from: canonicalizeStatus(lead.status),
+            to: canonicalizeStatus(lead.status),
+            source: "contractor-assigned",
+            note: `Contractor assigned: ${who}`,
+          } satisfies StatusHistoryEntry,
+        ],
+      };
+      await writeLeadPayload(id, next);
+      result = next;
+    });
+    leadWriteQueues.set(id, current);
+    try { await current; } finally {
+      if (leadWriteQueues.get(id) === current) leadWriteQueues.delete(id);
+    }
+    if (failure) return failure;
+    return { ok: true, lead: result as Record<string, unknown> };
+  },
+);
+
+/**
+ * Stage D4 — Send Work Order. Emails the assigned contractor (subcontractor
+ * email) or, when the contractor has no email, the business forward address.
+ * The body is built by src/lib/work-order.ts and contains ONLY what the
+ * contractor needs: customer name, service address/city, schedule, stump
+ * details, equipment checklist, notes — never estimate/deposit/balance,
+ * contractor cost, payout amounts, management fee, profit, or any internal
+ * financials (unit-tested). Records the send in email_history (type
+ * "work-order") and does NOT change pipeline status.
+ */
+export const sendWorkOrder = createServerFn({ method: "POST" }).handler(
+  async ({ data }: { data: { id: string } }): Promise<Response | { ok: boolean; messageId: string | null; error: string | null; lead: Record<string, unknown> }> => {
+    if (!(await isAuthenticated())) return unauthorizedResponse();
+    const id = String(data.id ?? "");
+    const lead = await readLeadPayload(id);
+    if (!lead) return jsonResponse({ error: "not_found" }, 404);
+    const sub = normalizeSubcontractor(lead.subcontractor);
+    const who = String(sub?.name || sub?.contact_person || "").trim();
+    if (!sub || !who) return jsonResponse({ error: "Enter a contractor name or contact person first" }, 400);
+    const recipient = String(sub.email ?? "").trim() || process.env.FORWARD_EMAIL || "";
+    if (!recipient) return jsonResponse({ error: "Add a contractor email (or configure FORWARD_EMAIL)" }, 400);
+    const customer = String(lead.name ?? lead.company ?? lead.contact_name ?? "Job");
+    const subject = `Work order — ${customer} (${id.slice(0, 8)})`;
+    const leadInput = lead as unknown as WorkOrderLeadInput;
+    const sent = await sendWithRetry(id, recipient, subject, buildWorkOrderHtml(leadInput), buildWorkOrderText(leadInput));
+    const now = new Date().toISOString();
+    const entry: EmailHistoryEntry = {
+      id: randomBytes(16).toString("hex"),
+      type: "work-order",
+      subject,
+      recipient,
+      status: !process.env.RESEND_API_KEY ? "not-configured" : sent.result.ok ? "sent" : "failed",
+      messageId: sent.result.messageId,
+      error: sent.result.error,
+      retryCount: sent.retryCount,
+      sentAt: now,
+    };
+    const next = {
+      ...lead,
+      email_history: [...(Array.isArray(lead.email_history) ? lead.email_history : []), entry],
+    };
+    await writeLeadPayload(id, next);
+    return { ok: sent.result.ok, messageId: sent.result.messageId, error: sent.result.error, lead: next };
   },
 );
 

@@ -505,8 +505,17 @@ export const sendDepositInvoice = createServerFn({ method: "POST" }).handler(asy
   const html = buildDepositInvoiceHtml({ name, estimate: lead.estimate, deposit: lead.deposit });
   const text = buildDepositInvoiceText({ name, estimate: lead.estimate, deposit: lead.deposit });
   const sent = await sendWithRetry(id, recipient, subject, html, text, undefined, "hello@hillcountrystumpco.com"); const now = new Date().toISOString();
-  const entry: EmailHistoryEntry = { id: randomBytes(16).toString("hex"), type: "deposit-invoice", subject, recipient, status: !process.env.RESEND_API_KEY ? "not-configured" : sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now };
-  const next = { ...lead, email: { status: entry.status, recipient, subject, messageId: entry.messageId ?? null, error: entry.error ?? null, retryCount: entry.retryCount, sentAt: entry.status === "sent" ? now : null, lastAttemptAt: now }, email_history: [...(Array.isArray(lead.email_history) ? lead.email_history : []), entry] };
+  const entries: EmailHistoryEntry[] = [{ id: randomBytes(16).toString("hex"), type: "deposit-invoice", subject, recipient, status: !process.env.RESEND_API_KEY ? "not-configured" : sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now }];
+  // Business notification to the owner (FORWARD_EMAIL), mirroring the estimate-approved notice.
+  const bizRecipient = process.env.FORWARD_EMAIL || "";
+  if (bizRecipient) {
+    const bizSubject = `Deposit invoice sent — ${name}`;
+    const adminLink = `${SITE_URL}/admin/lead/${id}`;
+    const biz = await sendWithRetry(id, bizRecipient, bizSubject, `<p>Deposit invoice of ${money(lead.deposit)} sent to ${recipient}.</p><p><a href="${adminLink}">Open lead in admin</a></p>`, `Deposit invoice of ${money(lead.deposit)} sent to ${recipient}. Admin lead page: ${adminLink}`, undefined, recipient);
+    entries.push({ id: randomBytes(16).toString("hex"), type: "other", subject: bizSubject, recipient: bizRecipient, status: !process.env.RESEND_API_KEY ? "not-configured" : biz.result.ok ? "sent" : "failed", messageId: biz.result.messageId, error: biz.result.error, retryCount: biz.retryCount, sentAt: now });
+  }
+  const entry = entries[0];
+  const next = { ...lead, email: { status: entry.status, recipient, subject, messageId: entry.messageId ?? null, error: entry.error ?? null, retryCount: entry.retryCount, sentAt: entry.status === "sent" ? now : null, lastAttemptAt: now }, email_history: [...(Array.isArray(lead.email_history) ? lead.email_history : []), ...entries] };
   await writeLeadPayload(id, next); return { ok: sent.result.ok, messageId: sent.result.messageId, error: sent.result.error, lead: next, recipient };
 });
 export const getEstimateView = createServerFn({ method: "POST" }).handler(async ({ data }: { data: { id: string; token: string } }) => {

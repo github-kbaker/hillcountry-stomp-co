@@ -122,7 +122,7 @@ function AdminDashboard() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2"><button onClick={runTestEmail} className="btn-primary px-4 py-2 text-sm">Send Test Email</button><button onClick={onLogout} className="btn-charcoal px-4 py-2 text-sm">Sign Out</button></div>
+        <div className="flex items-center gap-2"><Link to="/admin/calendar" className="btn-secondary px-4 py-2 text-sm">Calendar</Link><button onClick={runTestEmail} className="btn-primary px-4 py-2 text-sm">Send Test Email</button><button onClick={onLogout} className="btn-charcoal px-4 py-2 text-sm">Sign Out</button></div>
       </div>
       {testState && <div role="status" className="mt-3 rounded-lg border border-limestone-300 bg-limestone-50 px-4 py-3 text-sm">{testState}</div>}
 

@@ -86,4 +86,16 @@ export type LeadDetail = Record<string, unknown> & {
   status: LeadStatus;
   created_at: string;
   photos: string[];
+  email_history?: Array<{
+    id: string;
+    subject: string;
+    recipient: string;
+    status?: string;
+    messageId?: string;
+    error?: string;
+    retryCount?: number;
+    event?: string;
+    sentAt?: string;
+    type?: string;
+  }>;
 };

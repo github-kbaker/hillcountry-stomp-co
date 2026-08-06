@@ -27,6 +27,15 @@ import type {
   StatusHistoryEntry,
 } from "~/lib/admin-meta";
 import { SITE_NAME } from "~/lib/site";
+import {
+  buildCalendarEvent,
+  buildIcs,
+  formatServiceDate,
+  googleCalendarUrl,
+  icsFilename,
+  outlookCalendarUrl,
+  validateSchedule,
+} from "~/lib/calendar";
 
 export const Route = createFileRoute("/admin/lead/$id")({
   head: () => ({
@@ -58,6 +67,11 @@ function LeadDetailPage() {
   const [dirty, setDirty] = useState(false);
   const [marking, setMarking] = useState<string | null>(null);
   const [photoUrls, setPhotoUrls] = useState<string[]>([]);
+  // Stage D3 — Save to Calendar control state.
+  const [calOpen, setCalOpen] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [calErr, setCalErr] = useState("");
+  const [calMsg, setCalMsg] = useState("");
 
   useEffect(() => {
     (async () => {
@@ -164,6 +178,58 @@ function LeadDetailPage() {
       setError(e instanceof Error ? e.message : "Couldn't update status");
     } finally {
       setMarking(null);
+    }
+  }
+  /**
+   * Stage D3 — Save to Calendar. Pure client-side helper: builds the event
+   * from the on-screen schedule, validates first, then either opens Google /
+   * Outlook in a new tab or downloads the .ics file. Never touches lead data.
+   */
+  async function doCalendar(kind: "google" | "outlook" | "ics") {
+    setCalOpen(false);
+    setCalErr("");
+    setCalMsg("");
+    if (generating) return; // double-click protection
+    const v = validateSchedule(schedule);
+    if (!v.valid) {
+      setCalErr(v.error);
+      return;
+    }
+    const ev = buildCalendarEvent({
+      id: lead.id,
+      name: String(lead.name ?? lead.contact_name ?? lead.company ?? ""),
+      address: (lead.address as string | null | undefined) ?? null,
+      city: (lead.city as string | null | undefined) ?? null,
+      schedule: lead.schedule,
+    });
+    if (!ev) {
+      setCalErr("Couldn't build the calendar event — please try again.");
+      return;
+    }
+    setGenerating(true);
+    try {
+      if (kind === "google") {
+        window.open(googleCalendarUrl(ev), "_blank", "noopener,noreferrer");
+      } else if (kind === "outlook") {
+        window.open(outlookCalendarUrl(ev), "_blank", "noopener,noreferrer");
+      } else {
+        const blob = new Blob([buildIcs(ev)], { type: "text/calendar;charset=utf-8" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = icsFilename(ev);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 2000);
+      }
+      setCalMsg(
+        `Calendar event created for ${ev.customerName} on ${formatServiceDate(ev.start)}.`,
+      );
+    } catch {
+      setCalErr("Couldn't create the calendar event — please try again.");
+    } finally {
+      setGenerating(false);
     }
   }
 
@@ -581,6 +647,68 @@ function LeadDetailPage() {
               }
             />
           </label>
+        </div>
+        {/* Stage D3 — Save to Calendar (Google / Outlook / .ics) */}
+        <div className="mt-5 border-t border-limestone-200 pt-4">
+          <div className="relative inline-block">
+            <button
+              type="button"
+              onClick={() => {
+                setCalErr("");
+                setCalMsg("");
+                setCalOpen((o) => !o);
+              }}
+              disabled={generating}
+              className="btn-primary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {generating ? "Generating…" : "Save to Calendar"}
+            </button>
+            {calOpen && !generating && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setCalOpen(false)}
+                  aria-hidden="true"
+                />
+                <div
+                  className="absolute left-0 top-full z-20 mt-2 w-64 rounded-lg border border-limestone-200 bg-white p-1.5 shadow-lg"
+                  role="menu"
+                  aria-label="Save to calendar options"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => doCalendar("google")}
+                    className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-forest-800 hover:bg-forest-50"
+                  >
+                    Add to Google Calendar
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => doCalendar("outlook")}
+                    className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-forest-800 hover:bg-forest-50"
+                  >
+                    Add to Outlook
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => doCalendar("ics")}
+                    className="block w-full rounded px-3 py-2 text-left text-sm font-semibold text-forest-800 hover:bg-forest-50"
+                  >
+                    Download .ics
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          {calErr && (
+            <p className="mt-2 text-sm font-medium text-red-700">{calErr}</p>
+          )}
+          {calMsg && (
+            <p className="mt-2 text-sm font-medium text-forest-700">{calMsg}</p>
+          )}
         </div>
       </section>
 

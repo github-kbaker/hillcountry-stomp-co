@@ -88,7 +88,7 @@ function Header() {
             </a>
           )}
         </div>
-        <nav aria-label="Main" className="flex items-center gap-1 pb-3 text-sm lg:pb-0">
+        <nav aria-label="Main" className="flex flex-wrap items-center gap-1 pb-3 text-sm lg:pb-0">
           {NAV_LINKS.map((l) => (
             <Link
               key={l.href}

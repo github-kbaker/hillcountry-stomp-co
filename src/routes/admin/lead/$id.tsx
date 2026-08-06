@@ -1,6 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { buildEstimateHtml } from "~/lib/estimate-email";
 import {
   assignContractor,
   deleteLead,
@@ -8,7 +7,6 @@ import {
   getLeadPhoto,
   getSession,
   sendEstimate,
-  sendDepositInvoice,
   sendWorkOrder,
   updateLead,
   markLeadStatus,
@@ -103,8 +101,6 @@ function LeadDetailPage() {
   // Stage D4 — assign / work-order action state.
   const [busy, setBusy] = useState<string | null>(null);
   const [woMsg, setWoMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [preview, setPreview] = useState(false);
-  const [actionMsg, setActionMsg] = useState<{ok:boolean;text:string}|null>(null);
 
   useEffect(() => {
     (async () => {
@@ -186,13 +182,15 @@ function LeadDetailPage() {
   }
 
   async function estimate() {
-    if (busy) return; setBusy("estimate"); setActionMsg(null);
-    try { const r = await sendEstimate({data:{id}}); if (r instanceof Response || !r.ok) throw Error((r as any).error || "Send failed"); setLead(r.lead as LeadDetail); setActionMsg({ok:true,text:"Estimate sent."}); } catch(e) { setActionMsg({ok:false,text:e instanceof Error?e.message:"Unable to send estimate"}); } finally { setBusy(null); }
+    try {
+      const r = await sendEstimate({ data: { id } });
+      if (r instanceof Response || !r.ok) throw Error((r as any).error || "Send failed");
+      setLead(r.lead as LeadDetail);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Unable to send estimate");
+    }
   }
-  async function depositInvoice() {
-    if (busy) return; setBusy("deposit-invoice"); setActionMsg(null);
-    try { const r = await sendDepositInvoice({data:{id}}); if (r instanceof Response || !r.ok) throw Error((r as any).error || "Send failed"); setLead(r.lead as LeadDetail); setActionMsg({ok:true,text:"Deposit invoice sent."}); } catch(e) { setActionMsg({ok:false,text:e instanceof Error?e.message:"Unable to send deposit invoice"}); } finally { setBusy(null); }
-  }
+
   async function mark(to: LeadStatus, message: string) {
     if (marking) return; // double-click protection
     if (!window.confirm(message)) return;
@@ -594,16 +592,22 @@ function LeadDetailPage() {
 
       {/* ---- D1 finance card (Save / Send Estimate / fields) ---- */}
       <div className="card mt-6">
-        <div className="sticky top-2 z-10 mb-4 rounded-lg border border-limestone-200 bg-white/95 p-3 shadow-sm"><div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-          <button onClick={saveAll} disabled={saving || !dirty} className="btn-primary px-4 py-2 text-sm">{saving ? "Working…" : dirty ? "Save" : "Saved"}</button>
-          <button onClick={() => setPreview(true)} disabled={!!busy || !String(lead.estimate ?? "").trim() || n(lead.deposit)>n(lead.estimate)} className="btn-secondary px-4 py-2 text-sm">Preview Estimate</button>
-          <button onClick={estimate} disabled={!!busy || !String(lead.estimate ?? "").trim() || n(lead.deposit)>n(lead.estimate)} className="btn-secondary px-4 py-2 text-sm">{busy==="estimate"?"Working…":"Send Estimate"}</button>
-          <button onClick={()=>setCalOpen(true)} disabled={!!busy} className="btn-secondary px-4 py-2 text-sm">Save to Calendar</button>
-          <button onClick={depositInvoice} disabled={!!busy || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(lead.email ?? lead.customer_email ?? "")) || n(lead.deposit)<=0} title={n(lead.deposit)<=0?"Set a deposit first":""} className="btn-secondary px-4 py-2 text-sm">{busy==="deposit-invoice"?"Working…":"Send Deposit Invoice"}</button>
-          {stageIdx < statusStageIndex("scheduled") && <button onClick={()=>mark("scheduled","Mark this job as Scheduled?")} disabled={!!marking || stageIdx < statusStageIndex("estimate-accepted")} className="btn-secondary px-4 py-2 text-sm">Mark Scheduled</button>}
-          {stageIdx < statusStageIndex("in-progress") && <button onClick={()=>mark("in-progress","Mark this job as In Progress?")} disabled={!!marking || stageIdx < statusStageIndex("scheduled")} className="btn-secondary px-4 py-2 text-sm">Mark In Progress</button>}
-          {stageIdx < statusStageIndex("completed") && <button onClick={()=>mark("completed","Mark this job as Completed?")} disabled={!!marking || stageIdx < statusStageIndex("in-progress")} className="btn-secondary px-4 py-2 text-sm">Mark Complete</button>}
-        </div>{n(lead.deposit)<=0 && <p className="mt-2 text-xs text-charcoal-500">Set a deposit first</p>}{actionMsg && <p className={`mt-2 text-sm ${actionMsg.ok?"text-forest-700":"text-red-700"}`}>{actionMsg.text}</p>}</div>
+        <div className="mb-4 flex flex-wrap justify-end gap-2">
+          <button
+            onClick={saveAll}
+            disabled={saving || !dirty}
+            className="btn-primary px-4 py-2 text-sm"
+          >
+            {saving ? "Saving…" : dirty ? "Save" : "Saved"}
+          </button>
+          <button
+            onClick={estimate}
+            disabled={saving || !String(lead.estimate ?? "").trim() || n(lead.deposit) > n(lead.estimate)}
+            className="btn-secondary px-4 py-2 text-sm"
+          >
+            Send Estimate
+          </button>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="label">
             Pipeline status
@@ -1323,6 +1327,5 @@ function LineItems({
       </div>
       <p className="mt-3 text-right text-sm font-semibold">Total: {fmt(total)}</p>
     </section>
-      {preview && <div role="dialog" aria-modal="true" className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3" onClick={()=>setPreview(false)}><div className="max-h-[92vh] w-full max-w-3xl overflow-auto rounded-lg bg-white" onClick={e=>e.stopPropagation()}><div className="flex justify-between border-b p-4"><h2 className="font-bold">Estimate Preview</h2><button className="btn-secondary px-3 py-1" onClick={()=>setPreview(false)}>Close</button></div><div className="p-4" dangerouslySetInnerHTML={{__html:buildEstimateHtml({id,name:String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer"),estimate:lead.estimate,deposit:lead.deposit,balance:lead.balance,notes:lead.notes,approveUrl:"",paymentLink:null})}} /></div></div>}
   );
 }

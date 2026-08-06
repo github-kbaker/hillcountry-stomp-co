@@ -287,8 +287,17 @@ async function readAllLeads(): Promise<LeadRow[]> {
   return leads.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 }
 
-function money(v: unknown) { const n = Number(String(v ?? "").replace(/[$,]/g, "")); return Number.isFinite(n) ? `${n.toFixed(2)}` : "0.00"; }
-function amount(v: unknown) { const n = Number(String(v ?? "").replace(/[$,]/g, "")); return Number.isFinite(n) ? n : 0; }
+function cents(v: unknown): number { const n = Number(String(v ?? "").replace(/[$,]/g, "")); return Number.isFinite(n) ? Math.round(n * 100) : 0; }
+function money(v: unknown) { return (cents(v) / 100).toFixed(2); }
+function amount(v: unknown) { return cents(v) / 100; }
+function validateFinancials(patch: Record<string, unknown>, existing: Record<string, unknown>) {
+  const estimate = cents("estimate" in patch ? patch.estimate : existing.estimate);
+  const deposit = cents("deposit" in patch ? patch.deposit : existing.deposit);
+  if (estimate < 0) return "Estimate cannot be negative.";
+  if (deposit < 0) return "Deposit cannot be negative.";
+  if (deposit > estimate) return "Deposit cannot exceed the total estimate.";
+  return null;
+}
 function recomputeJobFinancials(next: Record<string, unknown>) {
   const charges = Array.isArray(next.service_charges) ? next.service_charges : [];
   const equipment = Array.isArray(next.equipment) ? next.equipment : [];
@@ -493,15 +502,19 @@ export const updateLead = createServerFn({ method: "POST" }).handler(
     const id = String(data.id ?? "");
     const patch = data.patch ?? {};
     if (patch.status && !(LEAD_STATUSES as readonly string[]).includes(String(patch.status))) return jsonResponse({ error: "invalid_status" }, 400);
-    const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status", "email", "customer_email", "paymentLink", "schedule", "subcontractor", "equipment", "service_charges", "management_fee", "contractor_cost"];
+    const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status", "email", "customer_email", "paymentLink", "schedule", "subcontractor", "equipment", "service_charges", "management_fee", "contractor_cost", "fuel", "disposal", "payment_processing_cost", "other_internal_cost"];
     let result: Record<string, unknown> | null = null;
     let failure: Response | null = null;
     const previous = leadWriteQueues.get(id) ?? Promise.resolve();
     const current = previous.then(async () => {
       const existing = await readLeadPayload(id);
       if (!existing) { failure = jsonResponse({ error: "not_found" }, 404); return; }
+      const financialError = validateFinancials(patch, existing);
+      if (financialError) { failure = jsonResponse({ error: financialError }, 400); return; }
       const next = { ...existing };
       for (const key of allowed) if (key in patch) next[key] = patch[key];
+      // Balance is always server-derived; never trust a client-supplied value.
+      next.balance = ((cents(next.estimate) - cents(next.deposit)) / 100).toFixed(2);
       recomputeJobFinancials(next);
       await writeLeadPayload(id, next);
       result = next;

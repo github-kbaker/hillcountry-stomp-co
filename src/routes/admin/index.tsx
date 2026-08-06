@@ -5,6 +5,17 @@ import { getSession, listLeads, logout, sendTestEmail } from "~/lib/admin";
 import { LEAD_SOURCES, LEAD_STATUSES } from "~/lib/admin-meta";
 import type { LeadListResult, LeadRow, LeadStatus } from "~/lib/admin-meta";
 import { SITE_NAME } from "~/lib/site";
+/**
+ * Render an email value that may be a plain string or an EmailState object
+ * (leads store `email` as an object after a send). Falls back to "" so
+ * callers can render "—" for empty.
+ */
+const emailStr = (v: unknown) =>
+  typeof v === "string"
+    ? v
+    : v && typeof v === "object" && "recipient" in v
+      ? String((v as { recipient: unknown }).recipient)
+      : "";
 
 /**
  * /admin — the lead pipeline dashboard.
@@ -218,7 +229,7 @@ function AdminDashboard() {
                           </a>
                         </div>
                         <div className="text-charcoal-500">
-                          {lead.email || "—"}
+                          {emailStr(lead.email) || "—"}
                         </div>
                       </td>
                       <td className="px-4 py-3 text-charcoal-700">
@@ -290,7 +301,7 @@ function LeadCard({ lead }: { lead: LeadRow }) {
           <a href={`tel:${lead.phone}`} className="hover:underline">
             {lead.phone || "—"}
           </a>{" "}
-          · {lead.email || "—"}
+          · {emailStr(lead.email) || "—"}
         </div>
         <div>
           {lead.city || "—"} · <KindBadge kind={lead.kind} /> ·{" "}

@@ -26,6 +26,7 @@ import type {
   StatusHistoryEntry,
 } from "./admin-meta";
 import { buildWorkOrderHtml, buildWorkOrderText } from "./work-order";
+import { buildEstimateHtml, buildEstimateText } from "./estimate-email";
 import type { WorkOrderLeadInput } from "./work-order";
 
 /**
@@ -482,8 +483,9 @@ export const sendEstimate = createServerFn({ method: "POST" }).handler(async ({ 
   const seeded = { ...lead, email_history: Array.isArray(lead.email_history) ? lead.email_history : [], approval_token: token, approved_at: lead.approved_at ?? null, paymentLink: lead.paymentLink ?? null };
   await writeLeadPayload(id, seeded);
   const name = String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer"); const subject = "Your estimate from Hill Country Stump Co."; const approveUrl = `${SITE_URL}/estimate/${id}?token=${token}`; const pay = String(lead.paymentLink ?? "");
-  const html = `<div style="font-family:Arial;color:#222"><div style="background:#235b3a;color:#fff;padding:28px"><strong style="font-size:22px">Hill Country Stump Co.</strong><br/>Stump grinding across the Texas Hill Country</div><div style="padding:28px"><h1>Estimate for ${esc(name)}</h1><p style="color:#666;font-size:12px">Reference ${esc(id)}</p><table style="width:100%;max-width:500px;border-collapse:collapse"><tr><td>Estimate amount</td><td>${money(lead.estimate)}</td></tr><tr><td>Deposit due</td><td>${money(lead.deposit)}</td></tr><tr><td>Balance due</td><td>${money(lead.balance)}</td></tr></table>${lead.notes ? `<p><strong>Notes</strong><br/>${esc(lead.notes)}</p>` : ""}<p><a href="${approveUrl}" style="display:inline-block;background:#235b3a;color:#fff;padding:14px 22px;border-radius:6px;text-decoration:none">Approve Estimate</a></p>${pay ? `<p><a href="${esc(pay)}" style="display:inline-block;background:#8b5e3c;color:#fff;padding:14px 22px;border-radius:6px;text-decoration:none">Pay Online</a></p>` : ""}<p>Questions? Reply to this email and we'll get right back to you.</p></div><footer style="color:#777;padding:20px">Hill Country Stump Co. · hello@hillcountrystumpco.com</footer></div>`;
-  const text = `Estimate for ${name}\nReference: ${id}\nEstimate amount: ${money(lead.estimate)}\nDeposit due: ${money(lead.deposit)}\nBalance due: ${money(lead.balance)}\n${lead.notes ? `Notes: ${lead.notes}\n` : ""}\nApprove Estimate: ${approveUrl}${pay ? `\nPay Online: ${pay}` : ""}\nQuestions? Reply to this email and we'll get right back to you.`;
+  const template = { id, name, estimate: lead.estimate, deposit: lead.deposit, balance: lead.balance, notes: lead.notes, approveUrl, paymentLink: pay || null };
+  const html = buildEstimateHtml(template);
+  const text = buildEstimateText(template);
   const pdf = await estimatePdf(lead); const sent = await sendWithRetry(id, recipient, subject, html, text, [{ filename: `estimate-${id.slice(0,8)}.pdf`, content: pdf.toString("base64") }], "hello@hillcountrystumpco.com");
   const now = new Date().toISOString(); const entry: EmailHistoryEntry = { id: randomBytes(16).toString("hex"), type: "estimate-sent", subject, recipient, status: !process.env.RESEND_API_KEY ? "not-configured" : sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now, attachment: "pdf" };
   const next = { ...seeded, email: { status: entry.status, recipient, subject, messageId: entry.messageId ?? null, error: entry.error ?? null, retryCount: entry.retryCount, sentAt: entry.status === "sent" ? now : null, lastAttemptAt: now }, email_history: [...(seeded.email_history as unknown[]), entry] };
@@ -493,6 +495,21 @@ export const sendEstimate = createServerFn({ method: "POST" }).handler(async ({ 
   await writeLeadPayload(id, next); return { ok: sent.result.ok, messageId: sent.result.messageId, error: sent.result.error, lead: next };
 });
 
+export const sendDepositInvoice = createServerFn({ method: "POST" }).handler(async ({ data }: { data: { id: string } }) => {
+  if (!(await isAuthenticated())) return unauthorizedResponse();
+  const id = String(data.id ?? ""); const lead = await readLeadPayload(id); if (!lead) return jsonResponse({ error: "not_found" }, 404);
+  const recipient = leadCustomerEmail(lead); const depositCents = cents(lead.deposit);
+  if (!recipient) return jsonResponse({ error: "A valid customer email is required." }, 400);
+  if (depositCents <= 0) return jsonResponse({ error: "Set a deposit first" }, 400);
+  const name = String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer"); const subject = `Deposit invoice — ${name} — Hill Country Stump Co.`;
+  const estimateAmount = money(lead.estimate); const depositAmount = money(lead.deposit); const balanceAmount = money((cents(lead.estimate)-depositCents)/100);
+  const html = `<div style="font-family:Arial;color:#222"><div style="background:#235b3a;color:#fff;padding:28px"><strong style="font-size:22px">Hill Country Stump Co.</strong></div><div style="padding:28px"><h1>Deposit invoice</h1><p>Hello ${esc(name)},</p><p>Your deposit invoice is <strong>${depositAmount}</strong>.</p><p>Estimate total: ${estimateAmount}<br/>Balance remaining after deposit: ${balanceAmount}</p><p>We'll send a secure payment link once online payments are connected.</p><p>Questions? Reply to this email and we'll get right back to you.</p></div><footer style="color:#777;padding:20px">Hill Country Stump Co. · hello@hillcountrystumpco.com</footer></div>`;
+  const text = `Hello ${name},\n\nDeposit invoice: ${depositAmount}\nEstimate total: ${estimateAmount}\nBalance remaining after deposit: ${balanceAmount}\n\nWe'll send a secure payment link once online payments are connected.\nQuestions? Reply to this email and we'll get right back to you.`;
+  const sent = await sendWithRetry(id, recipient, subject, html, text, undefined, "hello@hillcountrystumpco.com"); const now = new Date().toISOString();
+  const entry: EmailHistoryEntry = { id: randomBytes(16).toString("hex"), type: "deposit-invoice", subject, recipient, status: !process.env.RESEND_API_KEY ? "not-configured" : sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now };
+  const next = { ...lead, email: { status: entry.status, recipient, subject, messageId: entry.messageId ?? null, error: entry.error ?? null, retryCount: entry.retryCount, sentAt: entry.status === "sent" ? now : null, lastAttemptAt: now }, email_history: [...(Array.isArray(lead.email_history) ? lead.email_history : []), entry] };
+  await writeLeadPayload(id, next); return { ok: sent.result.ok, messageId: sent.result.messageId, error: sent.result.error, lead: next, recipient };
+});
 export const getEstimateView = createServerFn({ method: "POST" }).handler(async ({ data }: { data: { id: string; token: string } }) => {
   const lead = await readLeadPayload(String(data.id ?? "")); if (!lead || !data.token || data.token !== lead.approval_token) return { ok: false };
   return { ok: true, name: String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer"), id: String(lead.id ?? data.id), estimate: lead.estimate ?? "", deposit: lead.deposit ?? "", balance: lead.balance ?? "", notes: lead.notes ?? "", paymentLink: lead.paymentLink ?? null, approvedAt: lead.approved_at ?? null };

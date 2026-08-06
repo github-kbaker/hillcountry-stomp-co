@@ -7,6 +7,7 @@ import {
   getLeadPhoto,
   getSession,
   sendEstimate,
+  sendDepositInvoice,
   sendWorkOrder,
   updateLead,
   markLeadStatus,
@@ -34,6 +35,7 @@ import type {
   StatusHistoryEntry,
 } from "~/lib/admin-meta";
 import { SITE_NAME } from "~/lib/site";
+import { EstimatePreviewModal } from "~/components/EstimatePreviewModal";
 import {
   buildCalendarEvent,
   buildIcs,
@@ -101,6 +103,9 @@ function LeadDetailPage() {
   // Stage D4 — assign / work-order action state.
   const [busy, setBusy] = useState<string | null>(null);
   const [woMsg, setWoMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // Stage D5a — preview modal open state + inline action-bar feedback.
+  const [preview, setPreview] = useState(false);
+  const [actionMsg, setActionMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -182,12 +187,34 @@ function LeadDetailPage() {
   }
 
   async function estimate() {
+    if (busy) return; // double-click protection
+    setBusy("estimate");
+    setActionMsg(null);
     try {
       const r = await sendEstimate({ data: { id } });
       if (r instanceof Response || !r.ok) throw Error((r as any).error || "Send failed");
       setLead(r.lead as LeadDetail);
+      setActionMsg({ ok: true, text: "Estimate sent." });
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Unable to send estimate");
+      setActionMsg({ ok: false, text: e instanceof Error ? e.message : "Unable to send estimate" });
+    } finally {
+      setBusy(null);
+    }
+  }
+  /** Stage D5a — Send Deposit Invoice (server-enforced guards; never auto-marks paid). */
+  async function depositInvoice() {
+    if (busy) return; // double-click protection
+    setBusy("deposit-invoice");
+    setActionMsg(null);
+    try {
+      const r = await sendDepositInvoice({ data: { id } });
+      if (r instanceof Response || !r.ok) throw Error((r as any).error || "Send failed");
+      setLead(r.lead as LeadDetail);
+      setActionMsg({ ok: true, text: "Deposit invoice sent." });
+    } catch (e) {
+      setActionMsg({ ok: false, text: e instanceof Error ? e.message : "Unable to send deposit invoice" });
+    } finally {
+      setBusy(null);
     }
   }
 
@@ -359,6 +386,12 @@ function LeadDetailPage() {
   const stageIdx = statusStageIndex(lead.status);
   const cancelled = lead.status === "cancelled";
   const depositAmt = n(lead.deposit);
+  // Stage D5a — customer email unwrapped from EmailState (or the raw field).
+  const emailState = lead.email as { recipient?: string } | null | undefined;
+  const customerEmail =
+    String(emailState?.recipient ?? "").trim() ||
+    String(lead.customer_email ?? "").trim();
+  const hasCustEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(customerEmail);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
@@ -517,36 +550,6 @@ function LeadDetailPage() {
                 {marking === "deposit-paid" ? "Saving…" : "Mark Deposit Paid"}
               </button>
             )}
-            {stageIdx < statusStageIndex("in-progress") && (
-              <button
-                onClick={() =>
-                  mark("in-progress", "Mark this job as In Progress?")
-                }
-                disabled={marking !== null || stageIdx < statusStageIndex("scheduled")}
-                title={
-                  stageIdx < statusStageIndex("scheduled")
-                    ? "Schedule the job first"
-                    : ""
-                }
-                className="btn-secondary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {marking === "in-progress" ? "Saving…" : "Mark In Progress"}
-              </button>
-            )}
-            {stageIdx < statusStageIndex("completed") && (
-              <button
-                onClick={() => mark("completed", "Mark this job as Completed?")}
-                disabled={marking !== null || stageIdx < statusStageIndex("in-progress")}
-                title={
-                  stageIdx < statusStageIndex("in-progress")
-                    ? "Mark In Progress first"
-                    : ""
-                }
-                className="btn-secondary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                {marking === "completed" ? "Saving…" : "Mark Complete"}
-              </button>
-            )}
             {stageIdx < statusStageIndex("invoice-paid") && (
               <button
                 onClick={() =>
@@ -592,21 +595,87 @@ function LeadDetailPage() {
 
       {/* ---- D1 finance card (Save / Send Estimate / fields) ---- */}
       <div className="card mt-6">
-        <div className="mb-4 flex flex-wrap justify-end gap-2">
-          <button
-            onClick={saveAll}
-            disabled={saving || !dirty}
-            className="btn-primary px-4 py-2 text-sm"
-          >
-            {saving ? "Saving…" : dirty ? "Save" : "Saved"}
-          </button>
-          <button
-            onClick={estimate}
-            disabled={saving || !String(lead.estimate ?? "").trim() || n(lead.deposit) > n(lead.estimate)}
-            className="btn-secondary px-4 py-2 text-sm"
-          >
-            Send Estimate
-          </button>
+        {/* Stage D5a — consolidated action bar (owner order) */}
+        <div className="sticky top-2 z-10 mb-4 rounded-lg border border-limestone-200 bg-white/95 p-3 shadow-sm">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            <button
+              onClick={saveAll}
+              disabled={saving || !dirty}
+              className="btn-primary px-4 py-2 text-sm"
+            >
+              {saving ? "Saving…" : dirty ? "Save" : "Saved"}
+            </button>
+            <button
+              onClick={() => setPreview(true)}
+              disabled={!!busy || !String(lead.estimate ?? "").trim() || n(lead.deposit) > n(lead.estimate)}
+              className="btn-secondary px-4 py-2 text-sm"
+            >
+              Preview Estimate
+            </button>
+            <button
+              onClick={estimate}
+              disabled={!!busy || !String(lead.estimate ?? "").trim() || n(lead.deposit) > n(lead.estimate)}
+              className="btn-secondary px-4 py-2 text-sm"
+            >
+              {busy === "estimate" ? "Working…" : "Send Estimate"}
+            </button>
+            <button
+              onClick={() => {
+                setCalErr("");
+                setCalMsg("");
+                setCalOpen(true);
+              }}
+              disabled={!!busy}
+              className="btn-secondary px-4 py-2 text-sm"
+            >
+              Save to Calendar
+            </button>
+            <button
+              onClick={depositInvoice}
+              disabled={!!busy || !hasCustEmail || n(lead.deposit) <= 0}
+              title={n(lead.deposit) <= 0 ? "Set a deposit first" : !hasCustEmail ? "Add a customer email first" : ""}
+              className="btn-secondary px-4 py-2 text-sm"
+            >
+              {busy === "deposit-invoice" ? "Working…" : "Send Deposit Invoice"}
+            </button>
+            {stageIdx < statusStageIndex("scheduled") && (
+              <button
+                onClick={() => mark("scheduled", "Mark this job as Scheduled?")}
+                disabled={marking !== null || stageIdx < statusStageIndex("new")}
+                className="btn-secondary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {marking === "scheduled" ? "Saving…" : "Mark Scheduled"}
+              </button>
+            )}
+            {stageIdx < statusStageIndex("in-progress") && (
+              <button
+                onClick={() => mark("in-progress", "Mark this job as In Progress?")}
+                disabled={marking !== null || stageIdx < statusStageIndex("scheduled")}
+                title={stageIdx < statusStageIndex("scheduled") ? "Schedule the job first" : ""}
+                className="btn-secondary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {marking === "in-progress" ? "Saving…" : "Mark In Progress"}
+              </button>
+            )}
+            {stageIdx < statusStageIndex("completed") && (
+              <button
+                onClick={() => mark("completed", "Mark this job as Completed?")}
+                disabled={marking !== null || stageIdx < statusStageIndex("in-progress")}
+                title={stageIdx < statusStageIndex("in-progress") ? "Mark In Progress first" : ""}
+                className="btn-secondary px-4 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {marking === "completed" ? "Saving…" : "Mark Complete"}
+              </button>
+            )}
+          </div>
+          {n(lead.deposit) <= 0 && (
+            <p className="mt-2 text-xs text-charcoal-500">Set a deposit first</p>
+          )}
+          {actionMsg && (
+            <p className={`mt-2 text-sm ${actionMsg.ok ? "text-forest-700" : "text-red-700"}`}>
+              {actionMsg.text}
+            </p>
+          )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <label className="label">
@@ -1236,6 +1305,13 @@ function LeadDetailPage() {
           <p className="mt-3 text-charcoal-500">No photos uploaded.</p>
         )}
       </section>
+      {/* Stage D5a — Estimate Preview modal (no email is ever sent) */}
+      {preview && (
+        <EstimatePreviewModal
+          lead={lead as unknown as Record<string, unknown>}
+          onClose={() => setPreview(false)}
+        />
+      )}
     </div>
   );
 }

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { SITE_URL } from "./site";
 
 export type EmailResult = { ok: boolean; status: number; messageId: string | null; error: string | null };
-export type EmailHistoryEntry = { id: string; type: "estimate-sent" | "lead-notification" | "customer-confirmation" | "estimate-approved-notice" | "work-order" | "test" | "other"; subject: string; recipient: string; status: "sent" | "failed" | "not-configured"; messageId?: string | null; error?: string | null; retryCount: number; sentAt: string; attachment?: "pdf" | null };
+export type EmailHistoryEntry = { id: string; type: "estimate-sent" | "lead-notification" | "customer-confirmation" | "estimate-approved-notice" | "work-order" | "deposit-invoice" | "test" | "other"; subject: string; recipient: string; status: "sent" | "failed" | "not-configured"; messageId?: string | null; error?: string | null; retryCount: number; sentAt: string; attachment?: "pdf" | null };
 export type LeadEmail = { id: string; name?: string; company?: string; contact_name?: string; email?: string; customer_email?: string; phone?: string; city?: string; notes?: string; address?: string; kind?: string };
 export type EmailState = { status: "sent" | "failed" | "not-configured" | "pending"; recipient: string; subject: string; messageId: string | null; error: string | null; retryCount: number; sentAt: string | null; lastAttemptAt: string | null };
 

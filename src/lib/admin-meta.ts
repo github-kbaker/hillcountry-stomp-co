@@ -79,6 +79,10 @@ export type LeadDetail = Record<string, unknown> & {
   equipment?: EquipmentItem[];
   service_charges?: ServiceCharge[];
   management_fee?: string | null;
+  fuel?: string | null;
+  disposal?: string | null;
+  payment_processing_cost?: string | null;
+  other_internal_cost?: string | null;
   customer_total?: string;
   costs_total?: string;
   profit?: string;

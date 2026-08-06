@@ -225,7 +225,10 @@ function toLeadRow(payload: Record<string, unknown>): LeadRow {
       String(payload.contact_name ?? "") ||
       String(payload.name ?? ""),
     phone: String(payload.phone ?? ""),
-    email: String(payload.email ?? ""),
+    // Pass the raw value through (string or EmailState object) — the UI
+    // renders it via emailStr(). Stringifying here would produce the literal
+    // "[object Object]" in the dashboard email cell (PR #16 follow-up fix).
+    email: payload.email as string,
     city: String(payload.city ?? ""),
     lead_source: String(payload.lead_source ?? ""),
     utm: {

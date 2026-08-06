@@ -220,6 +220,8 @@ function toLeadRow(payload: Record<string, unknown>): LeadRow {
     created_at: String(payload.created_at ?? ""),
     num_stumps: String(payload.num_stumps ?? ""),
     email_status: payload.email as LeadRow["email_status"],
+    schedule: payload.schedule as LeadRow["schedule"],
+    customer_total: String(payload.customer_total ?? "0.00"),
   };
 }
 
@@ -285,7 +287,23 @@ async function readAllLeads(): Promise<LeadRow[]> {
   return leads.sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
 }
 
-function money(v: unknown) { const n = Number(String(v ?? "").replace(/[$,]/g, "")); return Number.isFinite(n) ? `${n.toFixed(2)}` : String(v || "—"); }
+function money(v: unknown) { const n = Number(String(v ?? "").replace(/[$,]/g, "")); return Number.isFinite(n) ? `${n.toFixed(2)}` : "0.00"; }
+function amount(v: unknown) { const n = Number(String(v ?? "").replace(/[$,]/g, "")); return Number.isFinite(n) ? n : 0; }
+function recomputeJobFinancials(next: Record<string, unknown>) {
+  const charges = Array.isArray(next.service_charges) ? next.service_charges : [];
+  const equipment = Array.isArray(next.equipment) ? next.equipment : [];
+  next.service_charges = charges.map((x: any) => ({ id: String(x?.id || randomBytes(8).toString("hex")), description: String(x?.description || ""), amount: String(x?.amount || "") }));
+  next.equipment = equipment.map((x: any) => ({ id: String(x?.id || randomBytes(8).toString("hex")), name: String(x?.name || ""), cost: String(x?.cost || "") }));
+  const schedule = next.schedule as any;
+  next.schedule = schedule ? { service_date: schedule.service_date ? String(schedule.service_date) : null, arrival_time: schedule.arrival_time ? String(schedule.arrival_time) : null, estimated_duration_hours: schedule.estimated_duration_hours ? String(schedule.estimated_duration_hours) : null } : null;
+  const sub = next.subcontractor as any;
+  next.subcontractor = sub ? { name: String(sub.name || ""), phone: String(sub.phone || ""), email: String(sub.email || ""), payout_status: sub.payout_status === "paid" ? "paid" : "unpaid", payout_paid_at: sub.payout_paid_at ? String(sub.payout_paid_at) : null } : null;
+  const chargesTotal = charges.reduce((s: number, x: any) => s + amount(x?.amount), 0);
+  const equipmentTotal = equipment.reduce((s: number, x: any) => s + amount(x?.cost), 0);
+  next.customer_total = (amount(next.estimate) + chargesTotal).toFixed(2);
+  next.costs_total = (amount(next.contractor_cost) + equipmentTotal).toFixed(2);
+  next.profit = (amount(next.customer_total) - amount(next.costs_total) - amount(next.management_fee)).toFixed(2);
+}
 function esc(v: unknown) { return String(v ?? "").replace(/[&<>\"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'\"':"&quot;","'":"&#39;"}[c] as string)); }
 async function estimatePdf(lead: Record<string, unknown>) {
   const chunks: Buffer[] = []; const doc = new PDFDocument({ size: "LETTER", margin: 48 });
@@ -475,7 +493,7 @@ export const updateLead = createServerFn({ method: "POST" }).handler(
     const id = String(data.id ?? "");
     const patch = data.patch ?? {};
     if (patch.status && !(LEAD_STATUSES as readonly string[]).includes(String(patch.status))) return jsonResponse({ error: "invalid_status" }, 400);
-    const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status", "email", "customer_email", "paymentLink"];
+    const allowed = ["status", "notes", "estimate", "deposit", "balance", "stripe_status", "email", "customer_email", "paymentLink", "schedule", "subcontractor", "equipment", "service_charges", "management_fee", "contractor_cost"];
     let result: Record<string, unknown> | null = null;
     let failure: Response | null = null;
     const previous = leadWriteQueues.get(id) ?? Promise.resolve();
@@ -484,6 +502,7 @@ export const updateLead = createServerFn({ method: "POST" }).handler(
       if (!existing) { failure = jsonResponse({ error: "not_found" }, 404); return; }
       const next = { ...existing };
       for (const key of allowed) if (key in patch) next[key] = patch[key];
+      recomputeJobFinancials(next);
       await writeLeadPayload(id, next);
       result = next;
     });

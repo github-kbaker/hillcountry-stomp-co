@@ -42,6 +42,11 @@ export type LeadSource = (typeof LEAD_SOURCES)[number];
 export const DEFAULT_LEAD_STATUS: LeadStatus = "new";
 
 /** One row in the dashboard list — a lean, display-ready summary of a lead. */
+export type JobSchedule = { service_date: string | null; arrival_time: string | null; estimated_duration_hours: string | null };
+export type Subcontractor = { name: string; phone: string; email: string; payout_status: "unpaid" | "paid" | null; payout_paid_at: string | null };
+export type EquipmentItem = { id: string; name: string; cost: string };
+export type ServiceCharge = { id: string; description: string; amount: string };
+
 export type LeadRow = {
   id: string;
   kind: string;
@@ -56,6 +61,8 @@ export type LeadRow = {
   created_at: string;
   num_stumps: string;
   email_status?: { status?: string; recipient?: string; subject?: string; messageId?: string | null; error?: string | null; retryCount?: number; sentAt?: string | null; lastAttemptAt?: string | null };
+  schedule?: JobSchedule | null;
+  customer_total?: string;
 };
 
 export type LeadListResult = {
@@ -66,6 +73,15 @@ export type LeadListResult = {
 
 export type LeadDetail = Record<string, unknown> & {
   id: string;
+  schedule?: JobSchedule | null;
+  subcontractor?: Subcontractor | null;
+  contractor_cost?: string | null;
+  equipment?: EquipmentItem[];
+  service_charges?: ServiceCharge[];
+  management_fee?: string | null;
+  customer_total?: string;
+  costs_total?: string;
+  profit?: string;
   kind: string;
   status: LeadStatus;
   created_at: string;

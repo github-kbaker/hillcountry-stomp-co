@@ -26,7 +26,7 @@ import type {
   StatusHistoryEntry,
 } from "./admin-meta";
 import { buildWorkOrderHtml, buildWorkOrderText } from "./work-order";
-import { buildEstimateHtml, buildEstimateText } from "./estimate-email";
+import { buildDepositInvoiceHtml, buildDepositInvoiceText, buildEstimateHtml, buildEstimateText } from "./estimate-email";
 import type { WorkOrderLeadInput } from "./work-order";
 
 /**
@@ -502,9 +502,8 @@ export const sendDepositInvoice = createServerFn({ method: "POST" }).handler(asy
   if (!recipient) return jsonResponse({ error: "A valid customer email is required." }, 400);
   if (depositCents <= 0) return jsonResponse({ error: "Set a deposit first" }, 400);
   const name = String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer"); const subject = `Deposit invoice — ${name} — Hill Country Stump Co.`;
-  const estimateAmount = money(lead.estimate); const depositAmount = money(lead.deposit); const balanceAmount = money((cents(lead.estimate)-depositCents)/100);
-  const html = `<div style="font-family:Arial;color:#222"><div style="background:#235b3a;color:#fff;padding:28px"><strong style="font-size:22px">Hill Country Stump Co.</strong></div><div style="padding:28px"><h1>Deposit invoice</h1><p>Hello ${esc(name)},</p><p>Your deposit invoice is <strong>${depositAmount}</strong>.</p><p>Estimate total: ${estimateAmount}<br/>Balance remaining after deposit: ${balanceAmount}</p><p>We'll send a secure payment link once online payments are connected.</p><p>Questions? Reply to this email and we'll get right back to you.</p></div><footer style="color:#777;padding:20px">Hill Country Stump Co. · hello@hillcountrystumpco.com</footer></div>`;
-  const text = `Hello ${name},\n\nDeposit invoice: ${depositAmount}\nEstimate total: ${estimateAmount}\nBalance remaining after deposit: ${balanceAmount}\n\nWe'll send a secure payment link once online payments are connected.\nQuestions? Reply to this email and we'll get right back to you.`;
+  const html = buildDepositInvoiceHtml({ name, estimate: lead.estimate, deposit: lead.deposit });
+  const text = buildDepositInvoiceText({ name, estimate: lead.estimate, deposit: lead.deposit });
   const sent = await sendWithRetry(id, recipient, subject, html, text, undefined, "hello@hillcountrystumpco.com"); const now = new Date().toISOString();
   const entry: EmailHistoryEntry = { id: randomBytes(16).toString("hex"), type: "deposit-invoice", subject, recipient, status: !process.env.RESEND_API_KEY ? "not-configured" : sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now };
   const next = { ...lead, email: { status: entry.status, recipient, subject, messageId: entry.messageId ?? null, error: entry.error ?? null, retryCount: entry.retryCount, sentAt: entry.status === "sent" ? now : null, lastAttemptAt: now }, email_history: [...(Array.isArray(lead.email_history) ? lead.email_history : []), entry] };

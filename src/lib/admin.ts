@@ -8,8 +8,19 @@ import { sendEmail, logEmail } from "./email";
 import type { EmailHistoryEntry, EmailState } from "./email";
 import PDFDocument from "pdfkit";
 import { SITE_URL } from "./site";
-import { DEFAULT_LEAD_STATUS, LEAD_STATUSES } from "./admin-meta";
-import type { LeadListResult, LeadRow, LeadStatus } from "./admin-meta";
+import {
+  LEAD_STATUSES,
+  applyAdminStatusChange,
+  applyStatusTransition,
+  canonicalizeStatus,
+  statusStageIndex,
+} from "./admin-meta";
+import type {
+  JobSchedule,
+  LeadListResult,
+  LeadRow,
+  LeadStatus,
+} from "./admin-meta";
 
 /**
  * IMPORTANT (build isolation): client components import the shared constants
@@ -200,9 +211,7 @@ function toLeadRow(payload: Record<string, unknown>): LeadRow {
   return {
     id: String(payload.id ?? ""),
     kind: String(payload.kind ?? "estimate"),
-    status: (LEAD_STATUSES as readonly string[]).includes(String(payload.status))
-      ? (payload.status as LeadStatus)
-      : DEFAULT_LEAD_STATUS,
+    status: canonicalizeStatus(payload.status),
     // Contractor inquiries carry company + contact_name; everyone else has name.
     name:
       String(payload.company ?? "") ||
@@ -471,7 +480,9 @@ export const sendEstimate = createServerFn({ method: "POST" }).handler(async ({ 
   const pdf = await estimatePdf(lead); const sent = await sendWithRetry(id, recipient, subject, html, text, [{ filename: `estimate-${id.slice(0,8)}.pdf`, content: pdf.toString("base64") }], "hello@hillcountrystumpco.com");
   const now = new Date().toISOString(); const entry: EmailHistoryEntry = { id: randomBytes(16).toString("hex"), type: "estimate-sent", subject, recipient, status: !process.env.RESEND_API_KEY ? "not-configured" : sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now, attachment: "pdf" };
   const next = { ...seeded, email: { status: entry.status, recipient, subject, messageId: entry.messageId ?? null, error: entry.error ?? null, retryCount: entry.retryCount, sentAt: entry.status === "sent" ? now : null, lastAttemptAt: now }, email_history: [...(seeded.email_history as unknown[]), entry] };
-  if (sent.result.ok && (["new", "pending-estimate"] as string[]).includes(String(next.status))) next.status = "estimate-sent";
+  // Stage D2: a successful send moves the lead to estimate-sent (monotonic —
+  // never downgrades an estimate-accepted/paid lead) and records an activity entry.
+  if (sent.result.ok) applyStatusTransition(next, "estimate-sent", "estimate-email");
   await writeLeadPayload(id, next); return { ok: sent.result.ok, messageId: sent.result.messageId, error: sent.result.error, lead: next };
 });
 
@@ -482,7 +493,10 @@ export const getEstimateView = createServerFn({ method: "POST" }).handler(async 
 
 export const approveEstimate = createServerFn({ method: "POST" }).handler(async ({ data }: { data: { id: string; token: string } }) => {
   const id = String(data.id ?? ""); const lead = await readLeadPayload(id); if (!lead || !data.token || data.token !== lead.approval_token) return { ok: false, error: "invalid_link" };
-  const approvedAt = new Date().toISOString(); const next = { ...lead, status: ["new", "pending-estimate", "estimate-sent"].includes(String(lead.status)) ? "approved" : lead.status, approved_at: approvedAt, approval_token: null, email_history: Array.isArray(lead.email_history) ? lead.email_history : [] };
+  const approvedAt = new Date().toISOString(); const next = { ...lead, approved_at: approvedAt, approval_token: null, email_history: Array.isArray(lead.email_history) ? lead.email_history : [] };
+  // Stage D2: customer approval moves the lead to estimate-accepted (monotonic —
+  // a lead already past acceptance stays put) and records the activity entry.
+  applyStatusTransition(next, "estimate-accepted", "customer-approval");
   const recipient = process.env.FORWARD_EMAIL || ""; const subject = `Estimate approved — ${String(lead.name ?? lead.company ?? lead.contact_name ?? "Customer")}`; const adminLink = `${SITE_URL}/admin/lead/${id}`; let entry: EmailHistoryEntry | null = null;
   if (recipient) { const sent = await sendWithRetry(id, recipient, subject, `<p>Estimate approved.</p><p><a href="${adminLink}">Open lead in admin</a></p>`, `Estimate approved. Admin lead page: ${adminLink}`, undefined, leadCustomerEmail(lead)); const now = new Date().toISOString(); entry = { id: randomBytes(16).toString("hex"), type: "estimate-approved-notice", subject, recipient, status: sent.result.ok ? "sent" : "failed", messageId: sent.result.messageId, error: sent.result.error, retryCount: sent.retryCount, sentAt: now }; } else { await logEmail({leadId:id,recipient:"",subject,error:"FORWARD_EMAIL not configured",retryCount:0,event:"not-configured"}); }
   if (entry) next.email_history = [...next.email_history, entry]; await writeLeadPayload(id, next); return { ok: true };
@@ -492,7 +506,71 @@ export const getLead = createServerFn({ method: "POST" }).handler(
   async ({ data }: { data: { id: string } }) => {
     if (!(await isAuthenticated())) return unauthorizedResponse();
     const payload = await readLeadPayload(String(data.id ?? ""));
-    return payload ? { ...(payload as object), id: String(data.id) } : jsonResponse({ error: "not_found" }, 404);
+    if (!payload) return jsonResponse({ error: "not_found" }, 404);
+    // Stage D2: normalize legacy statuses and ensure status_history is an array
+    // so the timeline UI always sees canonical data.
+    return {
+      ...(payload as object),
+      id: String(data.id),
+      status: canonicalizeStatus(payload.status),
+      status_history: Array.isArray(payload.status_history)
+        ? payload.status_history
+        : [],
+    };
+  },
+);
+
+/** Minimum source-stage index (in the 8-stage order) required for each mark action. */
+const MARK_MIN_STAGE: Record<string, { minStage: number; requiresDeposit?: boolean }> = {
+  "deposit-paid": { minStage: statusStageIndex("estimate-accepted"), requiresDeposit: true },
+  scheduled: { minStage: statusStageIndex("new") },
+  "in-progress": { minStage: statusStageIndex("scheduled") },
+  completed: { minStage: statusStageIndex("in-progress") },
+  "invoice-paid": { minStage: statusStageIndex("completed") },
+};
+
+/**
+ * Stage D2 — the mark buttons on the lead page. Moves a lead forward along the
+ * 8-stage timeline (monotonic), enforcing per-action minimum source stages and
+ * the deposit>0 rule for Deposit Paid. Records a status_history entry with
+ * source "admin". Returns the full updated lead for the page to refresh from.
+ */
+export const markLeadStatus = createServerFn({ method: "POST" }).handler(
+  async ({ data }: { data: { id: string; to: string } }) => {
+    if (!(await isAuthenticated())) return unauthorizedResponse();
+    const id = String(data.id ?? "");
+    const target = canonicalizeStatus(data.to);
+    const rule = MARK_MIN_STAGE[target];
+    if (!rule || target === "cancelled") {
+      return jsonResponse({ error: `invalid_target_status` }, 400);
+    }
+    let result: Record<string, unknown> | null = null;
+    let failure: Response | null = null;
+    const previous = leadWriteQueues.get(id) ?? Promise.resolve();
+    const current = previous.then(async () => {
+      const lead = await readLeadPayload(id);
+      if (!lead) { failure = jsonResponse({ error: "not_found" }, 404); return; }
+      const fromIdx = statusStageIndex(canonicalizeStatus(lead.status));
+      if (fromIdx < 0) { failure = jsonResponse({ error: "lead_cancelled" }, 400); return; }
+      if (fromIdx < rule.minStage) {
+        failure = jsonResponse({ error: `cannot mark ${target} from ${String(lead.status)}` }, 400);
+        return;
+      }
+      if (rule.requiresDeposit) {
+        const depositCents = cents(lead.deposit);
+        if (depositCents <= 0) { failure = jsonResponse({ error: "Set a deposit first" }, 400); return; }
+      }
+      const next = { ...lead };
+      applyStatusTransition(next, target, "admin");
+      await writeLeadPayload(id, next);
+      result = next;
+    });
+    leadWriteQueues.set(id, current);
+    try { await current; } finally {
+      if (leadWriteQueues.get(id) === current) leadWriteQueues.delete(id);
+    }
+    if (failure) return failure;
+    return { ok: true, lead: result };
   },
 );
 
@@ -512,7 +590,23 @@ export const updateLead = createServerFn({ method: "POST" }).handler(
       const financialError = validateFinancials(patch, existing);
       if (financialError) { failure = jsonResponse({ error: financialError }, 400); return; }
       const next = { ...existing };
-      for (const key of allowed) if (key in patch) next[key] = patch[key];
+      // Apply non-status patch keys first so applyAdminStatusChange below can
+      // read the PRE-patch status and record the correct `from`.
+      const statusPatch = patch.status;
+      for (const key of allowed) {
+        if (key !== "status" && key in patch) next[key] = patch[key];
+      }
+      // Stage D2: record an activity entry for any admin manual status change
+      // (the pipeline <select> + Save) — may move to any allowed status.
+      if (statusPatch && canonicalizeStatus(existing.status) !== canonicalizeStatus(statusPatch)) {
+        applyAdminStatusChange(next, statusPatch as LeadStatus);
+      }
+      // Stage D2: saving a schedule (service date set) auto-advances the lead to
+      // scheduled — monotonic only; never downgrades completed/invoice-paid/cancelled.
+      const sched = next.schedule as JobSchedule | null | undefined;
+      if (sched && String(sched.service_date ?? "").trim()) {
+        applyStatusTransition(next, "scheduled", "admin");
+      }
       // Balance is always server-derived; never trust a client-supplied value.
       next.balance = ((cents(next.estimate) - cents(next.deposit)) / 100).toFixed(2);
       recomputeJobFinancials(next);

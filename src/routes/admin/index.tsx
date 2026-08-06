@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useCallback, useEffect, useState } from "react";
 
 import { getSession, listLeads, logout, sendTestEmail } from "~/lib/admin";
-import { LEAD_SOURCES, LEAD_STATUSES } from "~/lib/admin-meta";
+import { LEAD_SOURCES, LEAD_STATUSES, STATUS_LABELS } from "~/lib/admin-meta";
 import type { LeadListResult, LeadRow, LeadStatus } from "~/lib/admin-meta";
 import { SITE_NAME } from "~/lib/site";
 /**
@@ -359,7 +359,7 @@ function Utm({ utm }: { utm: LeadRow["utm"] }) {
 }
 
 function formatStatus(status: string): string {
-  return status.replace(/-/g, " ");
+  return STATUS_LABELS[status as keyof typeof STATUS_LABELS] ?? status.replace(/-/g, " ");
 }
 
 function formatDate(iso: string): string {

@@ -188,7 +188,7 @@ function Hero() {
           <Link to="/estimate" className="btn-primary">
             Get Free Estimate
           </Link>
-          <PhoneCta className="btn-secondary" />
+          {HAS_PHONE && <PhoneCta className="btn-secondary" />}
         </div>
         <p className="mt-6 text-sm text-limestone-200">
           Locally owned and operated · Free estimates · Backyards to ranch land

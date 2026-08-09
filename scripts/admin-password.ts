@@ -49,3 +49,7 @@ console.log("");
 console.log("ADMIN PASSWORD (one-time, save it now):");
 console.log(password);
 console.log("");
+console.log("Set this in Vercel (Production + Preview) as ADMIN_SECRET_JSON:");
+console.log(`ADMIN_SECRET_JSON=${JSON.stringify(secret)}`);
+console.log("");
+console.log("The same secret was written to data/admin.secret.json for local development.");

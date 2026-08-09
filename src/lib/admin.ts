@@ -6,6 +6,8 @@ import { basename, join } from "node:path";
 import { sql } from "~/db";
 import { sendEmail, logEmail } from "./email";
 import type { EmailHistoryEntry, EmailState } from "./email";
+import { loadSecret } from "./admin-secret";
+import type { AdminSecret } from "./admin-secret";
 import PDFDocument from "pdfkit";
 import { SITE_URL } from "./site";
 import {
@@ -47,10 +49,13 @@ import type { WorkOrderLeadInput } from "./work-order";
  * client components only ever import the function stubs from here. Nothing
  * server-only is imported by a route file directly.
  *
- * AUTH: one admin account. The password hash (scrypt, salted) and the session
- * HMAC key are stored in <site>/data/admin.secret.json — a gitignored file that
- * is NEVER committed. Generate it with `bun run admin:password` (or the same
- * script), which prints the one-time plaintext password.
+ * AUTH: one admin account. In production the password hash (scrypt, salted)
+ * and the session HMAC key come from the ADMIN_SECRET_JSON environment
+ * variable (Vercel); locally they are read from <site>/data/admin.secret.json —
+ * a gitignored file that is NEVER committed. Generate both with
+ * `bun run admin:password`, which prints the one-time plaintext password and
+ * the JSON to paste into ADMIN_SECRET_JSON. The loading logic lives in
+ * ./admin-secret (a server-only module this file imports but never re-exports).
  *
  * SESSION: an httpOnly, Secure, SameSite=Lax cookie (`hcst_admin`) holding
  * `token.expiry.hmac`. The token is 32 random bytes; the HMAC is computed over
@@ -71,31 +76,7 @@ import type { WorkOrderLeadInput } from "./work-order";
 
 const COOKIE_NAME = "hcst_admin";
 const SESSION_SECONDS = 30 * 24 * 60 * 60; // 30 days
-const SECRET_PATH = join(process.cwd(), "data", "admin.secret.json");
 const LEADS_DIR = join(process.cwd(), "data", "leads");
-
-type AdminSecret = {
-  passwordHash: string; // hex of scrypt(password, salt, 64)
-  passwordSalt: string; // hex
-  sessionKey: string; // hex, HMAC key for session tokens
-  createdAt: string;
-};
-
-async function loadSecret(): Promise<AdminSecret> {
-  let raw: string;
-  try {
-    raw = await readFile(SECRET_PATH, "utf8");
-  } catch {
-    throw new Error(
-      "admin secret file not found — run `bun run admin:password` to create data/admin.secret.json",
-    );
-  }
-  const parsed = JSON.parse(raw) as Partial<AdminSecret>;
-  if (!parsed.passwordHash || !parsed.passwordSalt || !parsed.sessionKey) {
-    throw new Error("admin secret file is malformed — re-run `bun run admin:password`");
-  }
-  return parsed as AdminSecret;
-}
 
 function parseCookies(header: string | null | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -193,7 +174,8 @@ async function isAuthenticated(): Promise<boolean> {
     if (a.length !== b.length) return false;
     return timingSafeEqual(a, b);
   } catch {
-    // Missing/malformed secret file, storage errors, etc. — deny by default.
+    // Missing/malformed admin secret (ADMIN_SECRET_JSON or local file),
+    // storage errors, etc. — deny by default.
     return false;
   }
 }
@@ -384,7 +366,9 @@ export const login = createServerFn({ method: "POST" }).handler(
       secret = await loadSecret();
       storedHash = Buffer.from(secret.passwordHash, "hex");
     } catch {
-      console.error("[admin] login failed: secret file unavailable");
+      console.error(
+        "[admin] login failed: admin secret unavailable (set ADMIN_SECRET_JSON in production, or data/admin.secret.json locally)",
+      );
       return jsonResponse({ ok: false, error: "invalid_credentials" }, 401);
     }
 

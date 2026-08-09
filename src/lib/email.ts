@@ -29,7 +29,33 @@ export async function sendEmail({ to, subject, html, text, body, replyTo, attach
   } catch (e) { return { ok: false, status: 0, messageId: null, error: e instanceof Error ? e.message : String(e) }; }
 }
 
-export async function logEmail(entry: Record<string, unknown>) { try { const dir = join(process.cwd(), "data", "logs"); await mkdir(dir, { recursive: true }); await appendFile(join(dir, "email.log"), JSON.stringify({ timestamp: new Date().toISOString(), ...entry }) + "\n"); } catch (e) { console.error("[email] log failed", e); } }
+export async function logEmail(entry: Record<string, unknown>) {
+  const record = JSON.stringify({ timestamp: new Date().toISOString(), ...entry });
+  // Production (Vercel serverless): the function filesystem is read-only and
+  // ephemeral, so a file-based log cannot work there. Emit the structured
+  // record to the function's stdout (visible in Vercel function logs) and
+  // never touch the filesystem — logging can't fail or block email delivery.
+  // The record carries the outcome explicitly (event/status: sent | failed |
+  // not-configured) and never contains credentials.
+  if (process.env.NODE_ENV === "production") {
+    try {
+      console.log(`[email-log] ${record}`);
+    } catch {
+      // Logging must never interfere with email delivery — swallow any
+      // console failure (e.g. closed stdout) rather than propagate it.
+    }
+    return;
+  }
+  // Development: keep the local audit file under <site>/data/logs/email.log.
+  // Any filesystem failure is isolated — logging must never break the email flow.
+  try {
+    const dir = join(process.cwd(), "data", "logs");
+    await mkdir(dir, { recursive: true });
+    await appendFile(join(dir, "email.log"), record + "\n");
+  } catch (e) {
+    console.error("[email] log failed", e);
+  }
+}
 
 async function attempt(lead: LeadEmail, recipient: string, subject: string, html: string, text: string, replyTo?: string) {
   const customerName = lead.name ?? lead.company ?? lead.contact_name ?? "";
